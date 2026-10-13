@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Embed codes | How the Library Works</title>
+<style>
+  body{margin:0;font-family:"Frutiger","Helvetica Neue",Helvetica,Arial,sans-serif;font-size:16px;color:#25282A;background:#fff}
+  main{max-width:1100px;margin:0 auto;padding:32px 20px 64px}
+  h1{font-size:28px;margin:0 0 6px} h2{font-size:19px;margin:40px 0 8px} p{max-width:760px}
+  pre{overflow:auto;background:#F4F2EC;border:1px solid #D8D5CC;padding:12px;font-size:13px}
+  a{color:#1B4532} code{background:#F4F2EC;padding:1px 4px}
+  table{border-collapse:collapse;font-size:14px} td,th{border-bottom:1px solid #e2ddd0;padding:6px 10px;text-align:left;vertical-align:top}
+</style>
+</head>
+<body>
+<main>
+  <h1>How the Library Works: embed codes</h1>
+  <p>Staff notes. Paste any of these into a code block on a trlibrary.com page. The model loads lazily and sizes itself to the page column. Full-screen version: <a href="./">lbcsystems.labs.trlibrary.com</a>.</p>
+
+  <h2>All systems (overview with tabs)</h2>
+<pre>&lt;div id="trpl-lbcsystems"&gt;&lt;/div&gt;
+&lt;script src="https://lbcsystems.labs.trlibrary.com/embed.js" defer&gt;&lt;/script&gt;</pre>
+  <div id="trpl-lbcsystems"></div>
+  <script src="embed.js" defer></script>
+
+  <h2>One system only</h2>
+  <p>Use <code>data-layer</code> with <code>energy</code>, <code>water</code> or <code>carbon</code>. Add <code>data-lock="on"</code> to hide the other tabs.</p>
+<pre>&lt;div id="trpl-lbc-water"&gt;&lt;/div&gt;
+&lt;script src="https://lbcsystems.labs.trlibrary.com/embed.js" data-target="#trpl-lbc-water" data-layer="water" data-lock="on" defer&gt;&lt;/script&gt;</pre>
+
+  <h2>Open on a specific stop</h2>
+  <p>Stops are numbered as they appear in the panel. Example: the geothermal wells (Energy, stop 2).</p>
+<pre>&lt;div id="trpl-lbc-wells"&gt;&lt;/div&gt;
+&lt;script src="https://lbcsystems.labs.trlibrary.com/embed.js" data-target="#trpl-lbc-wells" data-layer="energy" data-stop="2" data-lock="on" defer&gt;&lt;/script&gt;</pre>
+
+  <h2>Model only (no text panel)</h2>
+  <p>For a hero area or a page that carries its own copy. Pair with <code>data-height</code>.</p>
+<pre>&lt;div id="trpl-lbc-hero"&gt;&lt;/div&gt;
+&lt;script src="https://lbcsystems.labs.trlibrary.com/embed.js" data-target="#trpl-lbc-hero" data-layer="carbon" data-panel="off" data-height="560" defer&gt;&lt;/script&gt;</pre>
+
+  <h2>Direct links</h2>
+  <table>
+    <tr><th>Link</th><th>Opens</th></tr>
+    <tr><td><a href="./#energy">/#energy</a></td><td>Energy layer</td></tr>
+    <tr><td><a href="./#water">/#water</a></td><td>Water layer</td></tr>
+    <tr><td><a href="./#carbon">/#carbon</a></td><td>Carbon layer</td></tr>
+    <tr><td><a href="./#energy/2">/#energy/2</a></td><td>Energy, stop 2 (geothermal wells)</td></tr>
+  </table>
+  <p>Stop numbers: Energy 1–6, Water 1–9, Carbon 1–7. Content lives in <code>assets/content.js</code>.</p>
+</main>
+</body>
+</html>
