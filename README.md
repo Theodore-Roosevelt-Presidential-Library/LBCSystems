@@ -53,3 +53,14 @@ Static site for GitHub Pages (no build step). three.js r160 is vendored in `asse
 - Formation under the site: the 2022 geotechnical report says weathered Sentinel Butte; the 2026 LBC Site Conditions document says Bullion Creek. The model shows a thin Sentinel Butte cap over clinker and Bullion Creek; confirm with a geologist before naming a formation in copy.
 - Grazing is described as planned ("the land plan calls for…") — update when grazing begins.
 - Certification language: SITES and LEED Platinum *precertification*; Living Building Challenge *pursuing*.
+
+## Carbon and water rework (Oct 2026)
+- **Photos** in the side panel come from the TRPL Acquia DAM (USGBC/Snappr LEED Platinum set, "Open Use"; no credit required), saved at 480 and 1400 px in `assets/photos/`.
+- **Carbon** stops are built around published facts: Mercer Mass Timber (~1,800 m³ CLT + glulam, FSC; ENR, Panel World), triangulated glulam over the breezeway (WoodWorks), roof build-up ~8 ft with 15 in of soil (Metropolis, Buildings.com), low-carbon concrete with 50–70% cement replacement and ~50% lower GWP (ForConstructionPros), rammed earth 24 in thick, ~240 ft long, built by Winn Construction in compacted lifts (Grand Forks Herald, Buildings.com), heart pine from Lavonia GA (Pioneer Millworks), Sagamore Hill copper beech (JLG, BD+C), Hebron brick, timber-mat benches, seed collection from 2022 incl. Maltese Cross and Elkhorn Ranch, grown at NDSU Hettinger (Snøhetta). Embodied-carbon percentages (26% / 52%) are from the Atelier Ten WBLCA in the LBC package.
+- Samples (carbon ledger, concrete cylinders, rammed-earth slice, reused materials) sit on the prairie south of the building and appear only on their stop. The breezeway diagrid, paddocks and the concrete binder split are illustrative.
+- **Water** now opens with a "Follow the water" overview (all pipes, see-through ground, labeled in/out points) and drops the duplicate mechanical-room and sprinkler stops.
+
+### Verify before promotion
+- Whether the copper beech was planted by Theodore Roosevelt (some sources say so; the page says only that it grew at Sagamore Hill).
+- That the benches in photo 019 are the reused timber mats; that the live-edge counter in photo 094 is the copper beech (caption avoids saying so).
+- Rammed-earth soil source (Metropolis: within 50 miles; Dezeen: on site) and height (27 vs 30 ft) — page avoids both.

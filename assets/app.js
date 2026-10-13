@@ -130,12 +130,18 @@ const bigBasin = site.basins.slice().sort((a, b) => polyArea(b) - polyArea(a))[0
 const bb = centroid(bigBasin); P.basin = [bb[0], bb[1], 3];
 P.lawn = [330, -620, 2];
 P.leach = [612, -470, -4];
-P.roots = [60, -470, -4];
+P.roots = [60, -470, 0];
 P.pasture = [-250, -800, 3];
 P.valley = [600, -200, -40];
 P.overlook = [site.overlook.c[0], site.overlook.c[1], 6];
 P.trailhead = [site.trailhead[0], site.trailhead[1], 4];
 P.loopW = (() => { const b = site.boardwalk; let m = b[0]; b.forEach(p => { if (p[0] < m[0]) m = p; }); return [m[0], m[1], 6]; })();
+// anchors given relative to the ground (z = height above terrain)
+const G = (x, y, dz) => [x, y, hAt(x, y) + dz];
+Object.assign(P, { pv: G(pvC[0], pvC[1], 24), vault: G(sys.vault[0], sys.vault[1], -6), headerMid: G(...sys.header[Math.floor(sys.header.length / 2)], -6),
+  road: G(1266, 86, 4), grid: G(1300, 120, 30), tanks: G(585, 175, -12), basin: G(bb[0], bb[1], 3), lawn: G(330, -620, 2), leach: G(612, -470, -3), roots: G(60, -470, -2),
+  valley: G(600, -200, -20), overlook: G(site.overlook.c[0], site.overlook.c[1], 6), trailhead: G(site.trailhead[0], site.trailhead[1], 4), field: G(1010, -300, -150) });
+P.loopW = G(P.loopW[0], P.loopW[1], 6);
 const at = a => typeof a === 'string' ? W(...P[a]) : W(...a);
 
 // ---------- strata material (cut faces, block sides) ----------
@@ -673,23 +679,23 @@ const section = new THREE.Group(); interior.add(section);
 // ---- specimens: exploded samples of the roof assembly and the radiant slab ----
 const specimens = {};
 {
-  const g = new THREE.Group(); const base = [95, 55, 14], S = 24;
+  // Roof build-up (Metropolis; Buildings.com; DD energy report): plants + 15 in of soil, membrane, R-70 insulation,
+  // 3 in concrete topping, 7-layer CLT, glulam beams about 4 ft deep — about 8 ft in all. Drawn exploded, true thicknesses.
+  const g = new THREE.Group(); const base = [95, 55, 12], S = 24;
   const put = (mesh, z) => { mesh.position.copy(W(base[0], base[1], z)); g.add(mesh); return mesh; };
-  let z = 0; const gap = 2.6; const lab = {};
-  // glulam beams
-  [-7, 7].forEach(o => { const b = new THREE.Mesh(new THREE.BoxGeometry(S, 2.4, 1.6), std('#C98846', { r: .6 })); b.position.copy(W(base[0], base[1] + o, base[2] + z + 1.2)); g.add(b); });
-  lab.glulam = [base[0] + S / 2, base[1] - 7, base[2] + z + 1.2]; z += 2.4 + gap;
-  // 7-layer CLT
-  for (let k = 0; k < 7; k++) { const ply = new THREE.Mesh(new THREE.BoxGeometry(S, .19, S), std(k % 2 ? '#E2B57A' : '#D19C5C', { r: .7 })); put(ply, base[2] + z + .1 + k * .2); }
-  lab.clt = [base[0] + S / 2, base[1] - S / 2, base[2] + z + .7]; z += 1.4;
-  put(new THREE.Mesh(new THREE.BoxGeometry(S, .35, S), std('#A9A7A1')), base[2] + z + .17); z += .35 + gap;
-  put(new THREE.Mesh(new THREE.BoxGeometry(S, 1.5, S), std('#EEE1A6', { r: .9 })), base[2] + z + .75);
-  lab.insul = [base[0] + S / 2, base[1] - S / 2, base[2] + z + .75]; z += 1.5 + gap * .6;
-  put(new THREE.Mesh(new THREE.BoxGeometry(S, .2, S), std('#2D2A27')), base[2] + z + .1); z += .2 + gap * .6;
-  put(new THREE.Mesh(new THREE.BoxGeometry(S, 1.3, S), std('#5B4330', { r: 1 })), base[2] + z + .65); z += 1.3;
-  const tufts = new THREE.InstancedMesh(new THREE.ConeGeometry(.45, 2.2, 5), std('#7E9A4A'), 120);
-  for (let i = 0; i < 120; i++) { m4.makeTranslation(base[0] + (Math.random() - .5) * (S - 1), base[2] + z + 1, -(base[1] + (Math.random() - .5) * (S - 1))); tufts.setMatrixAt(i, m4); }
-  g.add(tufts); lab.roofLayers = [base[0] + S / 2, base[1] - S / 2, base[2] + z + 1];
+  let z = 0; const gap = 2.2; const lab = {};
+  [-7, 7].forEach(o => { const b = new THREE.Mesh(new THREE.BoxGeometry(S, 4, 1.4), std('#C98846', { r: .6 })); b.position.copy(W(base[0], base[1] + o, base[2] + z + 2)); g.add(b); });
+  lab.glulam = [base[0] + S / 2, base[1] - 7, base[2] + z + 2]; z += 4 + gap;
+  for (let k = 0; k < 7; k++) { const ply = new THREE.Mesh(new THREE.BoxGeometry(S, .11, S), std(k % 2 ? '#E2B57A' : '#D19C5C', { r: .7 })); ply.rotation.y = k % 2 ? 0 : 0; put(ply, base[2] + z + .06 + k * .115); }
+  lab.clt = [base[0] + S / 2, base[1] - S / 2, base[2] + z + .4]; z += .8 + gap * .6;
+  put(new THREE.Mesh(new THREE.BoxGeometry(S, .25, S), std('#B3B0A9')), base[2] + z + .12); lab.topping = [base[0] - S / 2, base[1] + S / 2, base[2] + z + .12]; z += .25 + gap;
+  put(new THREE.Mesh(new THREE.BoxGeometry(S, 1.2, S), std('#EEE1A6', { r: .9 })), base[2] + z + .6);
+  lab.insul = [base[0] + S / 2, base[1] - S / 2, base[2] + z + .6]; z += 1.2 + gap * .6;
+  put(new THREE.Mesh(new THREE.BoxGeometry(S, .15, S), std('#2D2A27')), base[2] + z + .07); z += .15 + gap * .6;
+  put(new THREE.Mesh(new THREE.BoxGeometry(S, 1.25, S), std('#5B4330', { r: 1 })), base[2] + z + .62); lab.soil = [base[0] - S / 2, base[1] + S / 2, base[2] + z + .62]; z += 1.25;
+  const tufts = new THREE.InstancedMesh(new THREE.ConeGeometry(.45, 2.2, 5), std('#7E9A4A'), 140);
+  for (let i = 0; i < 140; i++) { m4.makeTranslation(base[0] + (Math.random() - .5) * (S - 1), base[2] + z + 1, -(base[1] + (Math.random() - .5) * (S - 1))); tufts.setMatrixAt(i, m4); }
+  g.add(tufts); lab.roofLayers = [base[0] + S / 2, base[1] - S / 2, base[2] + z + 1.5];
   g.visible = false; interior.add(g); specimens.roof = { g, lab };
 }
 {
@@ -819,7 +825,7 @@ const COOL = '#4E9BD6', WARM = '#F07F3C';
 callout(E, 'beam', W(...P.beamC.slice(0, 2), P.beamC[2] - 1));
 callout(E, 'air', W(...P.duct));
 
-Object.values(specimens).forEach(sp => Object.entries(sp.lab).forEach(([id, p]) => { callout(E, id, W(...p)); callout(groups.carbon, id, W(...p)); }));
+['roof', 'slab'].forEach(k => Object.entries(specimens[k].lab).forEach(([id, p]) => { callout(E, id, W(...p), { left: ['topping', 'soil'].includes(id) }); callout(groups.carbon, id, W(...p), { left: ['topping', 'soil'].includes(id) }); }));
 
 // ---------- WATER ----------
 const H2O = groups.water;
@@ -909,6 +915,11 @@ const PURPLE = '#7C6FD0', BLUE = '#3B9BD6';
   site.basins.forEach(b => H2O.add(drapePoly(b, bmat, .7)));
   animators.push(t => { bmat.opacity = REDUCED ? .45 : .35 + .15 * Math.sin(t * 1.2); });
   H2O.userData.rain = rain;
+  const mid = (r, f = .5) => r[Math.min(r.length - 1, Math.floor(r.length * f))];
+  callout(H2O, 'lSupply', B(...mid(routes.supply, .55), 3));
+  callout(H2O, 'lRecycled', B(...mid(routes.recycled, .6), 2), { left: true });
+  callout(H2O, 'lLeach', B(...mid(routes.leachFeed, .6), 3));
+  callout(H2O, 'lWaste', W(300, 135, 6), { left: true });
 
   // ---- underground detention under the east lot (C310.B, Contech system) ----
   const DT = sys.detention, da = DT.ang * D2R, du = [Math.cos(da), Math.sin(da)], dv = [-du[1], du[0]];
@@ -979,36 +990,150 @@ const PURPLE = '#7C6FD0', BLUE = '#3B9BD6';
 
 // ---------- CARBON ----------
 const C = groups.carbon;
+const label3 = (group, id, pos, left) => callout(group, id, pos, { left });
 {
-  // roots on the walls of the prairie pit, and soil cores
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  // ---- breezeway: glulam beams laid out in triangles under the roof (WoodWorks; Snøhetta) ----
+  {
+    const g = new THREE.Group(); C.add(g); specimens.diagrid = { g, lab: {} };
+    const bz = [[296, 38], [327, 38], [329, 192], [296, 192]];
+    const wood = std('#C98846', { r: .55, e: .08 });
+    const geos = [];
+    [90, 30, 150].forEach((deg, di) => {
+      const d = [Math.cos(deg * D2R), Math.sin(deg * D2R)], n = [-d[1], d[0]], sp = di ? 12 : 10.4;
+      for (let k = -30; k <= 30; k++) {
+        let run = [];
+        const flush = () => { if (run.length > 1) { const a = run[0], b = run[run.length - 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]); const c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; const top = Math.min(roofAt(...c), 36); const bx = new THREE.BoxGeometry(L, di ? 1.8 : 2.6, di ? .7 : .9); bx.rotateY(Math.atan2(d[1], d[0])); bx.translate(c[0], 31.8 - (di ? .9 : 1.3), -c[1]); geos.push(bx); } run = []; };
+        for (let t = -260; t <= 260; t += 1) { const x = 311 + n[0] * k * sp + d[0] * t, y = 115 + n[1] * k * sp + d[1] * t; if (inPoly(x, y, bz)) run.push([x, y]); else flush(); }
+        flush();
+      }
+    });
+    // columns
+    [[300, 60], [323, 90], [300, 120], [323, 150], [300, 180]].forEach(([x, y]) => { const c = new THREE.CylinderGeometry(.9, .9, 30, 12); c.translate(x, 15, -y); geos.push(c); });
+    g.add(new THREE.Mesh(mergeGeometries(geos), wood));
+    // CLT deck just above the beams
+    // carbon locked in the wood: slow green motes settling into the beams
+    const motes = []; for (let k = 0; k < 40; k++) { const x = rnd(298, 326), y = rnd(42, 188); motes.push([W(x + 40, y + 20, 70), W(x, y, 30)]); }
+    flows(g, motes, 'carbon', { stops: ['timber'], ov: false, spacing: 30, speed: 7, size: .45 });
+    g.visible = false;
+    callout(C, 'diagrid', W(318, 118, 29.5));
+    P.breezeway = [311, 100, 22];
+  }
+
+  // ---- material samples, set out on the prairie south of the building ----
+  const sampleAt = (x, y, lift = 0) => W(x, y, hAt(x, y) + lift);
+  // (a) carbon ledger: whole-building LCA (Atelier Ten, 2026) — typical steel building vs the Library
+  {
+    const g = new THREE.Group(); C.add(g); specimens.ledger = { g, lab: {} };
+    const c = [175, -150], gz = hAt(...c), k = 46;
+    const bar = (dx, h, color, op) => { const m = new THREE.Mesh(new THREE.BoxGeometry(12, h, 12), std(color, { r: .6, op, dw: op == null })); m.position.copy(W(c[0] + dx, c[1], gz + h / 2)); g.add(m); return m; };
+    bar(-22, k, '#8E9399');
+    bar(0, k * .74, '#C98846');
+    bar(22, k * .48, '#7FB069');
+    bar(22, k * .74, '#7FB069', .22).position.copy(W(c[0] + 22, c[1], gz + k * .74 / 2));
+    const base = new THREE.Mesh(new THREE.BoxGeometry(62, .6, 20), std('#E8E2D4')); base.position.copy(W(c[0], c[1], gz + .3)); g.add(base);
+    // carbon pulled out of the air and held in the wood (the hatched gap on the right bar)
+    flows(g, Array.from({ length: 16 }, () => { const x = c[0] + 22 + rnd(-5, 5), y = c[1] + rnd(-5, 5); return [W(x, y, gz + k * .74 + 22), W(x, y, gz + k * .5)]; }), 'carbon', { stops: ['embodied'], ov: false, spacing: 8, speed: 5, size: .5 });
+    label3(C, 'ledger0', W(c[0] - 22, c[1], gz + k + 1), true);
+    label3(C, 'ledger1', W(c[0], c[1], gz + k * .74 + 1));
+    label3(C, 'ledger2', W(c[0] + 22, c[1], gz + k * .48 + 1));
+    g.visible = false; P.ledger = [c[0], c[1], gz + 20];
+  }
+  // (b) low-carbon concrete: test cylinders, typical vs Library mixes (ForConstructionPros; Metropolis)
+  {
+    const g = new THREE.Group(); C.add(g); specimens.concrete = { g, lab: {} };
+    const c = [300, -150], gz = hAt(...c) + 1;
+    const cyl = (dx, parts) => { let z = gz; parts.forEach(([h, col]) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, h, 32), std(col, { r: .8 })); m.position.copy(W(c[0] + dx, c[1], z + h / 2)); g.add(m); z += h; }); return z; };
+    // binder share only, drawn as stacked bands: dark = portland cement, tan = fly ash, white = slag
+    const tTop = cyl(-12, [[18, '#5F6368']]);
+    const lTop = cyl(12, [[7.2, '#5F6368'], [5.4, '#C9B48A'], [5.4, '#ECEAE4']]);
+    // the CO2 that comes with each mix
+    const puff = (dx, n, top) => { for (let q = 0; q < n; q++) { const r = rnd(1, 1.7), m = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), std('#4F5D66', { op: .7, dw: false })); m.position.copy(W(c[0] + dx + rnd(-2.5, 2.5), c[1] + rnd(-2.5, 2.5), top + 2 + q * 1.4)); g.add(m); } };
+    puff(-12, 8, tTop); puff(12, 4, lTop);
+    const base = new THREE.Mesh(new THREE.BoxGeometry(44, .6, 16), std('#E8E2D4')); base.position.copy(W(c[0], c[1], gz - .7)); g.add(base);
+    label3(C, 'mixTypical', W(c[0] - 12, c[1], tTop + 14), true);
+    label3(C, 'mixLibrary', W(c[0] + 12, c[1], lTop + 8));
+    label3(C, 'flyash', W(c[0] + 16, c[1], gz + 10));
+    g.visible = false; P.concrete = [c[0], c[1], gz + 12];
+  }
+  // (c) rammed earth: a slice of the wall, 2 ft thick, built in compacted lifts (Grand Forks Herald; Buildings.com)
+  {
+    const g = new THREE.Group(); C.add(g); specimens.earth = { g, lab: {} };
+    const c = [55, -150], gz = hAt(...c), Lw = 22, T = 2, lift = 8 / 12, n = 33;
+    const pal = ['#D7B98C', '#C9A177', '#B9825A', '#A9703F', '#C79A6A', '#E0C59A', '#9C8A74', '#B57B4F'].map(x => new THREE.Color(x));
+    const geo = new THREE.BoxGeometry(Lw, lift, T); const im = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 1 }), n);
+    let band = 0;
+    for (let q = 0; q < n; q++) { if (Math.random() < .35) band = (band + 1 + (Math.random() * 3 | 0)) % pal.length; m4.makeTranslation(c[0], gz + 1 + lift / 2 + q * lift, -c[1]); im.setMatrixAt(q, m4); im.setColorAt(q, pal[band].clone().offsetHSL(0, 0, rnd(-.03, .03))); }
+    g.add(im);
+    // the lift being packed: loose 12 in of earth tamped down to 8 in, over and over
+    const top = gz + 1 + n * lift, loose = new THREE.Mesh(new THREE.BoxGeometry(Lw, 1, T), std('#D2AE80', { r: 1 })); g.add(loose);
+    const form = new THREE.Mesh(new THREE.BoxGeometry(Lw + .6, 1.6, T + .8), std('#6E5A45', { op: .5, dw: false })); form.position.copy(W(c[0], c[1], top + .8)); g.add(form);
+    const tamp = new THREE.Group(); const shaft = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, 4, 8), std('#4A4F55', { m: .5 })); shaft.position.y = 2; const foot = new THREE.Mesh(new THREE.CylinderGeometry(.45, .45, .25, 16), std('#4A4F55', { m: .5 })); tamp.add(shaft, foot); g.add(tamp);
+    animators.push(t => { if (!g.visible) return; const ph = REDUCED ? 1 : (t * .45) % 1; const h = 1 - .33 * ph; loose.scale.y = h; loose.position.copy(W(c[0], c[1], top + h / 2)); const k = (t * 3) % 1; const along = Math.sin(t * .7) * (Lw / 2 - 1); tamp.position.copy(W(c[0] + along, c[1], top + h + (REDUCED ? .3 : Math.abs(Math.sin(k * Math.PI)) * 1.2))); });
+    label3(C, 'earthLifts', W(c[0] + Lw / 2, c[1], gz + 12));
+    label3(C, 'earthThick', W(c[0] - Lw / 2, c[1], top + 2), true);
+    g.visible = false; P.earth = [c[0], c[1], gz + 12];
+  }
+  // (d) saved and used again: heart pine, Sagamore Hill copper beech, Hebron brick, timber-mat bench
+  {
+    const g = new THREE.Group(); C.add(g); specimens.reuse = { g, lab: {} };
+    const c = [420, -150], gz = hAt(...c) + .3;
+    // heart pine boards, 5, 7 and 9 in wide
+    [5, 7, 9, 5, 7, 9, 7].forEach((w, q) => { const b = new THREE.Mesh(new THREE.BoxGeometry(12, .1, w / 12), std(q % 2 ? '#B5733A' : '#A9652F', { r: .55 })); let off = 0; for (let r = 0; r < q; r++) off += [5, 7, 9, 5, 7, 9, 7][r] / 12 + .05; b.position.copy(W(c[0] - 16, c[1] - 2 + off, gz + 2.2)); g.add(b); });
+    const stand = new THREE.Mesh(new THREE.BoxGeometry(12.4, 2, 4.9), std('#E8E2D4')); stand.position.copy(W(c[0] - 16, c[1] + .4, gz + 1)); g.add(stand);
+    // live-edge slab (copper beech)
+    const sh = new THREE.Shape(); sh.moveTo(-7, -1.2); for (let x = -7; x <= 7; x += .7) sh.lineTo(x, -1.2 - Math.abs(Math.sin(x * 1.3)) * .45 - (x * x) / 70); for (let x = 7; x >= -7; x -= .7) sh.lineTo(x, 1.4 + Math.abs(Math.cos(x * 1.1)) * .5 - (x * x) / 90); sh.closePath();
+    const slab = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: .35, bevelEnabled: true, bevelSize: .06, bevelThickness: .05, bevelSegments: 2 }), std('#9B4F2E', { r: .45 }));
+    slab.rotation.x = -Math.PI / 2; slab.position.copy(W(c[0], c[1], gz + 3)); g.add(slab);
+    [[-5, 0], [5, 0]].forEach(([dx]) => { const l = new THREE.Mesh(new THREE.BoxGeometry(.4, 3, 2), std('#2E2B28', { m: .4 })); l.position.copy(W(c[0] + dx, c[1], gz + 1.5)); g.add(l); });
+    // crushed Hebron brick
+    const nb = 260, brick = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(.28), std('#A4472E', { r: 1 }), nb);
+    for (let q = 0; q < nb; q++) { const a = rnd(0, 6.28), r = Math.sqrt(Math.random()) * 3.4, x = c[0] + 13 + Math.cos(a) * r, y = c[1] + Math.sin(a) * r, h = Math.max(0, 1.6 - r * .45) + rnd(0, .2); m4.makeRotationFromEuler(new THREE.Euler(rnd(0, 3), rnd(0, 3), 0)).setPosition(x, gz + h, -y); brick.setMatrixAt(q, m4); brick.setColorAt(q, new THREE.Color('#A4472E').offsetHSL(rnd(-.02, .02), 0, rnd(-.08, .08))); }
+    g.add(brick);
+    // bench from reused construction timber mats
+    [0, 1, 2].forEach(q => { const t = new THREE.Mesh(new THREE.BoxGeometry(10, 1, 1), std('#8B7558', { r: .9 })); t.position.copy(W(c[0] + 26, c[1] - 1 + q * 1.02, gz + 1.7)); g.add(t); });
+    [[-4], [4]].forEach(([dx]) => { const t = new THREE.Mesh(new THREE.BoxGeometry(1, 1.2, 3.2), std('#7B664C', { r: .9 })); t.position.copy(W(c[0] + 26 + dx, c[1], gz + .6)); g.add(t); });
+    const base = new THREE.Mesh(new THREE.BoxGeometry(60, .4, 12), std('#E8E2D4')); base.position.copy(W(c[0] + 5, c[1], gz - .2)); g.add(base);
+    label3(C, 'pine', W(c[0] - 16, c[1], gz + 2.6), true);
+    label3(C, 'beech', W(c[0], c[1], gz + 3.6));
+    label3(C, 'brick', W(c[0] + 13, c[1], gz + 1.8));
+    label3(C, 'mats', W(c[0] + 26, c[1], gz + 2.4));
+    g.visible = false; P.reuse = [c[0] + 5, c[1], gz + 6];
+  }
+
+  // ---- prairie: soil pit with deep roots, seed story, soil cores ----
   const rstop = LAYERS.carbon.stops.find(s => s.id === 'prairie');
   const { u, v, c0 } = cutFrame(rstop.cut.c, rstop.cut.ang, rstop.cut.l, rstop.cut.w);
   const L = rstop.cut.l, Wd = rstop.cut.w;
-  const rootPos = []; const rnd = (a, b) => a + Math.random() * (b - a);
+  const rootPos = [];
   const wallPts = [];
-  for (let s = 1; s < L; s += 1.6) { wallPts.push([c0[0] + u[0] * s + v[0] * .25, c0[1] + u[1] * s + v[1] * .25, v]); wallPts.push([c0[0] + u[0] * s + v[0] * (Wd - .25), c0[1] + u[1] * s + v[1] * (Wd - .25), [-v[0], -v[1]]]); }
-  for (let t = 1; t < Wd; t += 1.6) { wallPts.push([c0[0] + v[0] * t + u[0] * .25, c0[1] + v[1] * t + u[1] * .25, u]); wallPts.push([c0[0] + v[0] * t + u[0] * (L - .25), c0[1] + v[1] * t + u[1] * (L - .25), [-u[0], -u[1]]]); }
+  for (let s = 1; s < L; s += 1.3) { wallPts.push([c0[0] + u[0] * s + v[0] * .25, c0[1] + u[1] * s + v[1] * .25]); wallPts.push([c0[0] + u[0] * s + v[0] * (Wd - .25), c0[1] + u[1] * s + v[1] * (Wd - .25)]); }
+  for (let t = 1; t < Wd; t += 1.3) { wallPts.push([c0[0] + v[0] * t + u[0] * .25, c0[1] + v[1] * t + u[1] * .25]); wallPts.push([c0[0] + v[0] * t + u[0] * (L - .25), c0[1] + v[1] * t + u[1] * (L - .25)]); }
   wallPts.forEach(([x, y]) => {
-    const depth = rnd(4, 13); let px = x, py = y, pz = hAt(x, y);
-    const segs = 9; const t0 = [rnd(-1, 1), rnd(-1, 1)];
-    for (let k = 0; k < segs; k++) { const nz = pz - depth / segs, nx = px + rnd(-.5, .5) * .6 + t0[0] * .08, ny = py + rnd(-.5, .5) * .6 + t0[1] * .08; rootPos.push(px, pz, -py, nx, nz, -ny); if (k > 2 && Math.random() < .35) { rootPos.push(nx, nz, -ny, nx + rnd(-1.5, 1.5), nz - rnd(.5, 2), -ny + rnd(-1.5, 1.5)); } px = nx; py = ny; pz = nz; }
+    const depth = rnd(5, 15); let px = x, py = y, pz = hAt(x, y);
+    const segs = 12; const t0 = [rnd(-1, 1), rnd(-1, 1)];
+    for (let k = 0; k < segs; k++) { const nz = pz - depth / segs, nx = px + rnd(-.5, .5) * .6 + t0[0] * .08, ny = py + rnd(-.5, .5) * .6 + t0[1] * .08; rootPos.push(px, pz, -py, nx, nz, -ny); if (k > 2 && Math.random() < .45) { rootPos.push(nx, nz, -ny, nx + rnd(-1.5, 1.5), nz - rnd(.5, 2.5), -ny + rnd(-1.5, 1.5)); } px = nx; py = ny; pz = nz; }
   });
   const rgeo = new THREE.BufferGeometry(); rgeo.setAttribute('position', new THREE.Float32BufferAttribute(rootPos, 3));
-  const roots = new THREE.LineSegments(rgeo, new THREE.LineBasicMaterial({ color: '#E8D9A8' })); C.add(roots);
-  // grass tufts on the pit rim
-  const tuft = new THREE.InstancedMesh(new THREE.ConeGeometry(.6, 2.8, 5), std('#8F9B55'), wallPts.length); wallPts.forEach(([x, y], i) => { m4.makeTranslation(x, hAt(x, y) + 1.3, -y); tuft.setMatrixAt(i, m4); }); C.add(tuft);
-  // carbon drifting into the prairie
-  const dots = []; for (let i = 0; i < 26; i++) { const x = c0[0] + u[0] * rnd(0, L) + v[0] * rnd(0, Wd), y = c0[1] + u[1] * rnd(0, L) + v[1] * rnd(0, Wd); dots.push([W(x + 30, y + 30, 80), W(x, y, 1), W(x + .3, y, -8)]); }
-  flows(C, dots.slice(0, 14), 'carbon', { stops: ['prairie', 'soil'], ov: false, spacing: 22, speed: 6, size: .4, glow: .5 });
-  callout(C, 'roots', W(c0[0] + v[0] * Wd + u[0] * L * .5, c0[1] + v[1] * Wd + u[1] * L * .5, -6));
-  // soil cores standing on the pit floor
-  for (let i = 0; i < 4; i++) { const s = L * (.25 + i * .17), t = Wd * .55; const x = c0[0] + u[0] * s + v[0] * t, y = c0[1] + u[1] * s + v[1] * t; const core = new THREE.Mesh(new THREE.CylinderGeometry(.5, .5, 3.5, 12), std('#5A4128', { e: .1 })); core.position.copy(W(x, y, -14)); const tubeC = new THREE.Mesh(new THREE.CylinderGeometry(.62, .62, 3.6, 12, 1, true), std('#E3E7EA', { op: .35, dw: false, side: THREE.DoubleSide })); tubeC.position.copy(core.position); C.add(core, tubeC); if (!i) callout(C, 'cores', W(x, y, -11.5)); }
-  P.rootsCore = [rstop.cut.c[0], rstop.cut.c[1], -10];
-  // glulam/CLT callouts in carbon too
-  // grazing paddock fences in the west pasture
-  const fp = []; for (let i = 0; i < 4; i++) { const x = -420 + i * 110; fp.push(x, 2, 600, x, 2, 950); }
-  const fg = new THREE.BufferGeometry(); fg.setAttribute('position', new THREE.Float32BufferAttribute(fp, 3));
-  C.add(new THREE.LineSegments(fg, new THREE.LineBasicMaterial({ color: '#6B5A3E' })));
+  C.add(new THREE.LineSegments(rgeo, new THREE.LineBasicMaterial({ color: '#F1E3B4' })));
+  const grassGeo = new THREE.ConeGeometry(.5, 3.2, 5);
+  const tuft = new THREE.InstancedMesh(grassGeo, std('#8F9B55'), wallPts.length); wallPts.forEach(([x, y], q) => { m4.makeTranslation(x, hAt(x, y) + 1.5, -y); tuft.setMatrixAt(q, m4); }); C.add(tuft);
+  const dots = []; for (let q = 0; q < 20; q++) { const x = c0[0] + u[0] * rnd(0, L) + v[0] * rnd(0, Wd), y = c0[1] + u[1] * rnd(0, L) + v[1] * rnd(0, Wd), g0 = hAt(x, y); dots.push([W(x + 25, y + 25, g0 + 60), W(x, y, g0 + 1), W(x + .3, y, g0 - rnd(4, 12))]); }
+  flows(C, dots, 'carbon', { stops: ['prairie', 'soil'], ov: false, spacing: 14, speed: 6, size: .45 });
+  callout(C, 'roots', W(c0[0] + v[0] * Wd + u[0] * L * .5, c0[1] + v[1] * Wd + u[1] * L * .5, hAt(...rstop.cut.c) - 6));
+  for (let q = 0; q < 4; q++) { const s2 = L * (.25 + q * .17), t = Wd * .55; const x = c0[0] + u[0] * s2 + v[0] * t, y = c0[1] + u[1] * s2 + v[1] * t, fl = hAt(...rstop.cut.c) - 18; const core = new THREE.Mesh(new THREE.CylinderGeometry(.5, .5, 3.5, 12), std('#5A4128', { e: .1 })); core.position.copy(W(x, y, fl + 1.75)); const tubeC = new THREE.Mesh(new THREE.CylinderGeometry(.62, .62, 3.6, 12, 1, true), std('#E3E7EA', { op: .35, dw: false, side: THREE.DoubleSide })); tubeC.position.copy(core.position); C.add(core, tubeC); if (!q) callout(C, 'cores', W(x, y, fl + 3.8)); }
+
+  // ---- grazing: paddock fences and a small herd, rotated through the pasture ----
+  const fpos = []; const px0 = -1150, py0 = -180, pw = 110, ph = 300;
+  for (let q = 0; q <= 4; q++) { const x = px0 + q * pw; for (let y = py0; y > py0 - ph; y -= 10) fpos.push(x, hAt(x, y) + 2, -y, x, hAt(x, y - 10) + 2, -(y - 10)); }
+  [py0, py0 - ph].forEach(y => { for (let x = px0; x < px0 + 4 * pw; x += 10) fpos.push(x, hAt(x, y) + 2, -y, x + 10, hAt(x + 10, y) + 2, -y); });
+  const fg = new THREE.BufferGeometry(); fg.setAttribute('position', new THREE.Float32BufferAttribute(fpos, 3));
+  C.add(new THREE.LineSegments(fg, new THREE.LineBasicMaterial({ color: '#5E4E36' })));
+  const herd = new THREE.InstancedMesh(new THREE.BoxGeometry(7, 4.5, 3), std('#3B2B22', { r: .9 }), 18); herd.frustumCulled = false; C.add(herd);
+  const cows = Array.from({ length: 18 }, () => [rnd(10, pw - 10), rnd(20, ph - 20), rnd(0, 6.28)]);
+  animators.push(t => { if (!C.visible) return; const pad = REDUCED ? 1 : Math.floor(t / 6) % 4; cows.forEach(([ox, oy, a], q) => { const x = px0 + pad * pw + ox, y = py0 - oy, w2 = Math.sin(t * .3 + q) * 2; m4.compose(new THREE.Vector3(x + w2, hAt(x, y) + 2.3, -y), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, a, 0)), new THREE.Vector3(1, 1, 1)); herd.setMatrixAt(q, m4); }); herd.instanceMatrix.needsUpdate = true; });
+  P.pasture = [px0 + 2 * pw, py0 - ph / 2, hAt(px0 + 2 * pw, py0 - ph / 2)];
+  P.rootsCore = [rstop.cut.c[0], rstop.cut.c[1], hAt(...rstop.cut.c) - 10];
 }
 
 // ---------- hotspots per layer ----------
@@ -1027,11 +1152,12 @@ function viewFor(s) {
   const t = at(s.at); const v = s.view || { dist: 600, tilt: .9 };
   const az = (v.az === 'perp' ? P.processAz : v.az === 'drain' ? P.roofdrainAz : (v.az ?? 230)) * D2R, el = Math.max(.12, Math.min(1.4, v.tilt)) * .78;
   const dir = new THREE.Vector3(Math.cos(az) * Math.cos(el), Math.sin(el), -Math.sin(az) * Math.cos(el));
+  if (v.from) return { t, pos: W(...v.from) };
   return { t, pos: t.clone().add(dir.multiplyScalar(v.dist)) };
 }
 function setXray(v) {
   xray = v; btnUnder.setAttribute('aria-pressed', v);
-  groundMats.forEach(m => { m.opacity = v ? .4 : 1; m.depthWrite = !v; if (m.transparent !== v) { m.transparent = v; m.needsUpdate = true; } });
+  groundMats.forEach(m => { m.opacity = v ? (layer === 'water' && stop >= 0 && LAYERS.water.stops[stop].id === 'loop' ? .22 : .4) : 1; m.depthWrite = !v; if (m.transparent !== v) { m.transparent = v; m.needsUpdate = true; } });
   controls.maxPolarAngle = v || CUT.on ? Math.PI * .62 : Math.PI * .49;
 }
 function setRoof(off) { roofOff = off; btnRoof.setAttribute('aria-pressed', off); roofParts.forEach(m => m.visible = !off); }
@@ -1043,8 +1169,9 @@ function setCuts(stopDef) {
   if (tc) { const keep = CUT.on && same(CUT, tc); Object.assign(CUT, tc, { on: true, depth: (tc.depth ?? (stopDef.id === 'wells' ? 330 : stopDef.id === 'tanks' ? 26 : 18)) - hAt(...tc.c) }); if (!keep) CUT.k = REDUCED ? 1 : 0; } else CUT.on = false;
   if (bc) { const keep = BCUT.on && same(BCUT, bc) && BCUT.z === bc.z; Object.assign(BCUT, bc, { on: true }); if (!keep) BCUT.k = REDUCED ? 1 : 0; } else BCUT.on = false;
   interior.visible = !!bc || roofOff;
-  section.visible = !!bc && bc.ang === 0; mech.visible = !!bc && bc.ang !== 0 || roofOff;
-  Object.entries(specimens).forEach(([k, sp]) => sp.g.visible = stopDef?.specimen === k);
+  section.visible = !!bc && bc.ang === 0 && !bc.bare; mech.visible = !!bc && bc.ang !== 0 && !bc.bare || roofOff;
+  const sps = [].concat(stopDef?.specimen || []);
+  Object.entries(specimens).forEach(([k, sp]) => sp.g.visible = sps.includes(k));
   setTrenches(stopDef?.trench || null);
   updateCut(); updateBcut();
 }
@@ -1055,7 +1182,7 @@ function showCallouts(list) {
 const legendEl = document.createElement('div'); legendEl.className = 'legend'; viewer.appendChild(legendEl);
 function updateFlows(id) {
   const keys = [];
-  const active = f => id ? (!f.stops || f.stops.includes(id)) : f.ov;
+  const active = f => id === 'loop' ? f.group === groups.water : id ? (!f.stops || f.stops.includes(id)) : f.ov;
   flowReg.forEach(f => { if (!f.phys) f.inst.visible = active(f); });
   flowReg.forEach(f => { if (active(f) && isShown(f.inst) && !keys.includes(f.key)) keys.push(f.key); });
   legendEl.innerHTML = keys.length ? `<b>Moving dots</b>${keys.filter(k => LEGEND[k]).map(k => `<span><i style="--c:${LEGEND[k][1]}"></i>${LEGEND[k][0]}</span>`).join('')}` : '';
@@ -1082,7 +1209,7 @@ function selectStop(i) {
   setCuts(s);
   setXray(!!s.xray);
   setWood(layer === 'carbon');
-  if (groups.water.userData.rain) groups.water.userData.rain.visible = ['roof', 'basins', 'sprinklers', 'loop'].includes(s.id);
+  if (groups.water.userData.rain) groups.water.userData.rain.visible = ['roof', 'basins'].includes(s.id);
   showCallouts(s.show);
   updateFlows(s.id);
   hotspotEls[layer].forEach((el, j) => el.classList.toggle('active', j === i));
@@ -1099,7 +1226,7 @@ function renderPanel() {
   if (layer === 'overview') {
     body = `<div class="pick">${['energy', 'water', 'carbon'].map(k => `<button data-go="${k}" style="--c:${LAYERS[k].color}"><b>${LAYERS[k].label}</b><span>${LAYERS[k].stops.length} stops</span></button>`).join('')}</div>`;
   } else {
-    body = `<ol class="stops">${L.stops.map((s, i) => `<li class="${i === stop ? 'open' : ''}"><button data-stop="${i}" aria-expanded="${i === stop}"><i>${i + 1}</i>${s.title}${s.cut || s.bcut ? '<em class="cut-tag">cutaway</em>' : ''}</button>${i === stop ? `<div class="detail"><p>${s.text}</p><div class="nav">${i > 0 ? `<button data-stop="${i - 1}">‹ Back</button>` : '<span></span>'}${i < L.stops.length - 1 ? `<button data-stop="${i + 1}" class="next">Next ›</button>` : `<button data-go="overview" class="next">All systems</button>`}</div></div>` : ''}</li>`).join('')}</ol>`;
+    body = `<ol class="stops">${L.stops.map((s, i) => `<li class="${i === stop ? 'open' : ''}"><button data-stop="${i}" aria-expanded="${i === stop}"><i>${i + 1}</i>${s.title}${s.cut || s.bcut ? '<em class="cut-tag">cutaway</em>' : ''}</button>${i === stop ? `<div class="detail">${s.photo ? `<figure class="ph"><img src="assets/photos/trpl-${s.photo[0]}-480.jpg" srcset="assets/photos/trpl-${s.photo[0]}-480.jpg 480w, assets/photos/trpl-${s.photo[0]}-1400.jpg 1400w" sizes="(max-width: 760px) 92vw, 400px" alt="${s.photo[1]}" loading="lazy"><figcaption>${s.photo[1]}</figcaption></figure>` : ''}<p>${s.text}</p><div class="nav">${i > 0 ? `<button data-stop="${i - 1}">‹ Back</button>` : '<span></span>'}${i < L.stops.length - 1 ? `<button data-stop="${i + 1}" class="next">Next ›</button>` : `<button data-go="overview" class="next">All systems</button>`}</div></div>` : ''}</li>`).join('')}</ol>`;
   }
   panel.querySelector('.panel-body').innerHTML = `<div class="eyebrow">Theodore Roosevelt Presidential Library</div><h2>${L.title}</h2><p class="intro">${L.intro}</p>${stats}${body}<p class="note">${NOTE}</p>`;
   panel.querySelectorAll('[data-stop]').forEach(b => b.addEventListener('click', () => { const i = +b.dataset.stop; if (i === stop && b.closest('li') && !b.classList.contains('next')) { stop = -1; setCuts(null); setXray(false); showCallouts([]); updateFlows(null); renderPanel(); hotspotEls[layer].forEach(el => el.classList.remove('active')); return; } selectStop(i); }));
