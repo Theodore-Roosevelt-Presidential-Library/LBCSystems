@@ -30,7 +30,7 @@ export const LAYERS = {
     stops: [
       { id: 'solar', title: 'Solar canopies',
         text: 'Timber canopies over the parking lots carry 792 solar panels, with more on the roof of the maintenance and land stewardship building. Together they are rated at about 352 kilowatts and are expected to make roughly 419,000 kilowatt-hours a year, while shading the cars below.',
-        at: 'pv', view: { dist: 560, tilt: 0.75, az: 215 }, show: ['pv'] },
+        at: 'pv', trench: ['solarFeed'], view: { dist: 600, tilt: 0.7, az: 215 }, show: ['pv'] },
       { id: 'wells', title: '216 wells, 300 feet down',
         text: 'Under the parking lot, 216 boreholes drop 300 feet through the banded sandstone, siltstone, clay and lignite of the badlands, set at least 20 feet apart. Each holds a loop of plastic pipe sealed in grout. A mix of water and antifreeze runs down one side and back up the other, trading heat with rock that holds a steady temperature all year.',
         at: 'field', cut: { c0: [985, -255], ang: -90, l: 900, w: 600 },
@@ -40,7 +40,7 @@ export const LAYERS = {
         at: 'vault', xray: true, view: { dist: 620, tilt: 1.05, az: 215 }, show: ['vault'] },
       { id: 'header', title: 'Down the hill to the plant',
         text: 'From the vault, the pair of mains runs about 750 feet beneath the drive and the drop-off loop to the mechanical room in the east building. Two pumps, each able to move 600 gallons a minute, keep the loop flowing.',
-        at: 'headerMid', xray: true, view: { dist: 900, tilt: 0.95, az: 200 }, show: ['mains'] },
+        at: 'headerMid', trench: ['header'], view: { dist: 230, tilt: 0.85, az: 215 }, show: ['mains'] },
       { id: 'plant', title: 'Inside the mechanical room',
         text: 'Three water-to-water heat pumps pull warmth out of the loop in winter. In summer a 200-ton chiller with a frictionless magnetic-bearing compressor cools the building and sends its heat back down the wells. Even the hot water for sinks comes from a heat pump, one that uses carbon dioxide as its refrigerant. The boiler is electric, too.',
         at: 'mech', bcut: { c: 'mech', ang: -101.3, l: 110, w: 70, z: 13 },
@@ -72,28 +72,35 @@ export const LAYERS = {
     stops: [
       { id: 'pipeline', title: 'A pipeline from Lake Sakakawea',
         text: 'Drinking water comes through the Southwest Water Authority pipeline. It is drawn from Lake Sakakawea, treated in Dickinson and piped about 86 miles. The Library’s connection is limited to 7 gallons a minute, so water is stored on site rather than drawn in big bursts.',
-        at: 'road', xray: true, view: { dist: 1000, tilt: 0.9, az: 200 } },
+        at: 'road', trench: ['supply'], view: { dist: 420, tilt: 0.85, az: 205 } },
       { id: 'tanks', title: 'Tanks in the berm',
         text: 'Buried in the berm east of the building are the tanks that make the system work: three process tanks where wastewater settles and is first treated, a 15,000-gallon tank of drinking water, and a 40,000-gallon tank that holds 30,000 gallons for firefighting and 10,000 gallons of recycled water.',
         at: 'tanks', cut: { c: [585, 175], ang: 30, l: 150, w: 92 },
         view: { dist: 330, tilt: 0.62, az: 190 }, show: ['proc', 'potable', 'np', 'lift'] },
+      { id: 'process', title: 'From flush to reuse',
+        text: 'Here is the whole treatment train, step by step. Wastewater drops into a lift station and is pumped to a trash trap, where solids settle out. Equalization tanks even out the flow over the day. In the bioreactor, microbes in an oxygen-poor zone and then an oxygen-rich zone, fed with bubbled air, break down the waste. Membranes filter the water, ultraviolet light disinfects it, and it waits in a holding tank until it’s needed to flush toilets or is sent to the leach fields. Leftover sludge is hauled off site.',
+        at: 'process', specimen: 'process', view: { dist: 310, tilt: 0.14, az: 'perp' }, show: ['pf'] },
       { id: 'treat', title: 'Cleaned right here',
         text: 'A membrane bioreactor in the mechanical room can treat up to 12,800 gallons a day. Wastewater moves through a trash trap and equalization tanks, then microbes in oxygen-poor and oxygen-rich zones break down the waste. Membranes with pores far finer than a hair filter the water, and ultraviolet light disinfects it, with no chlorine.',
         at: 'mech', bcut: { c: 'mech', ang: -101.3, l: 110, w: 70, z: 13 },
         view: { dist: 220, tilt: 1.05, az: 120 }, show: ['MBR', 'BREAK', 'proc'] },
       { id: 'reuse', title: 'Used again',
         text: 'Treated water is stored and piped back into the building to flush toilets and urinals. Efficient fixtures plus recycled water cut the Library’s drinking-water use by about 60% compared with a typical building.',
-        at: [200, 90, 6], roof: false, view: { dist: 650, tilt: 1.1, az: 210 } },
+        at: [480, 105, 4], trench: ['recycled'], roof: false, view: { dist: 260, tilt: 0.9, az: 200 } },
       { id: 'leach', title: 'Back into the ground',
         text: 'Water the building doesn’t reuse is pumped to leach fields inside the Boardwalk loop. Each field is a set of trenches 100 feet long, 2 feet wide and 4 feet deep, filled with drain rock around a perforated pipe, so the water seeps slowly into the soil. Together the fields can take 14,700 gallons a day.',
-        at: 'leach', cut: { c: [612, -470], ang: -22, l: 120, w: 110, depth: 4.1 },
+        at: 'leach', trench: ['leachFeed'], cut: { c: [612, -470], ang: -22, l: 120, w: 110, depth: 4.1 },
         view: { dist: 190, tilt: 0.5, az: 230 }, show: ['trench'] },
       { id: 'roof', title: 'Rain on a prairie roof',
-        text: 'The roof is planted with native prairie that soaks up rain where it falls. What the roof can’t hold runs off into the prairie basins below.',
-        at: [170, 140, 42], view: { dist: 520, tilt: 0.85, az: 215 } },
+        text: 'Rain soaks into the growing soil of the prairie roof, where the plants’ roots take it up. When the soil is full, extra water drains through pipes that let it out at the foot of the building, and it flows across the ground into the prairie basins.',
+        at: 'roofdrain', view: { dist: 170, tilt: 0.32, az: 'drain' }, show: ['roofdrain'] },
       { id: 'basins', title: 'Eight prairie basins',
         text: 'Eight shallow basins planted with native grasses catch runoff from the roof, walkways and parking. Together they hold about 31,800 cubic feet of water, just over twice what the Living Building Challenge requires, and they cut peak runoff from a 100-year storm by more than half.',
         at: 'basin', view: { dist: 700, tilt: 1.0, az: 215 } },
+      { id: 'detention', title: 'Storm storage under the east lot',
+        text: 'Rain that runs off the east parking lot drops through grates into an underground detention system, a bed of large chambers more than 200 feet long. It holds a storm’s runoff and lets it out slowly through a pipe, so the water doesn’t rush down the draws all at once. It stores stormwater; it isn’t a tank for reusing rain indoors.',
+        at: 'detention', cut: { c: [1940.7, 485.5], ang: 115.4, l: 150, w: 70, depth: 16 },
+        view: { dist: 260, tilt: 0.6, az: 210 }, show: ['detention'] },
       { id: 'sprinklers', title: 'No sprinklers',
         text: 'Once new plants are established, the irrigation system is shut off for good, kept only for emergencies. After that, the prairie lives on what falls from the sky, about 15 inches a year.',
         at: 'lawn', view: { dist: 850, tilt: 1.0, az: 215 } },
@@ -182,11 +189,13 @@ export const CALLOUTS = {
   np: ['40,000 gallons', 'fire storage + recycled water'],
   lift: ['Lift station', ''],
   trench: ['Leach trench', '100 × 2 × 4 ft, drain rock'],
+  roofdrain: ['Roof drain outlet', 'extra water out to the basins'],
+  detention: ['Detention chambers', 'hold runoff, release it slowly'],
   roots: ['Prairie roots', 'carbon stored underground'],
   cores: ['Soil cores', 'a baseline for soil carbon']
 };
 
-export const NOTE = 'Built from the Library’s construction drawings and design documents, with the building and land from the Library’s campus model. Pipes, tanks and equipment are drawn in their planned locations; the drinking-water and fire tanks are placed approximately. Rock layers follow the badlands around Medora and are drawn to illustrate, not from site borings. The Library has earned SITES and LEED Platinum precertification and is pursuing Living Building Challenge certification.';
+export const NOTE = 'Built from the Library’s construction drawings and design documents, with the building from the Library’s campus model and the land from USGS 3D Elevation Program lidar. Pipes, tanks and equipment are drawn in their planned locations; the drinking-water and fire tanks are placed approximately. Rock layers follow the badlands around Medora and are drawn to illustrate, not from site borings. The Library has earned SITES and LEED Platinum precertification and is pursuing Living Building Challenge certification.';
 
 // What the moving dots mean (key -> [label, color]); shown in the on-screen legend.
 export const LEGEND = {
@@ -204,5 +213,6 @@ export const LEGEND = {
   treated: ['Cleaned, recycled water', '#A79BEA'],
   soak: ['Water soaking into the soil', '#C2B8FF'],
   rain: ['Rain and runoff', '#5AA9D6'],
-  carbon: ['Carbon drawn from the air', '#5C7F8F']
+  carbon: ['Carbon drawn from the air', '#5C7F8F'],
+  air: ['Air bubbled in for the microbes', '#FFFFFF']
 };

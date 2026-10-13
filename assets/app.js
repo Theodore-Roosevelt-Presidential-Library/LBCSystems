@@ -225,7 +225,7 @@ const terrainTop = (() => {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
-  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, clipIntersection: true }));
+  const m = new THREE.Mesh(g, withTrench(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, clipIntersection: true })));
   m.receiveShadow = true; groundMats.push(m.material); groups.ground.add(m);
   return m;
 })();
@@ -386,6 +386,107 @@ function flows(group, paths, key, { spacing = 30, speed = 34, size = 2.2, glow =
 }
 const smooth = (pts, n = 6) => new THREE.CatmullRomCurve3(pts, false, 'catmullrom', .15).getSpacedPoints(Math.max(2, pts.length * n));
 
+
+// ---------- shared time uniform ----------
+const uTime = { value: 0 };
+animators.push(t => { uTime.value = REDUCED ? 0 : t; });
+
+// ---------- trenches: open the ground along a pipe route ----------
+const TRENCH = { segs: { value: Array.from({ length: 48 }, () => new THREE.Vector4(1e6, 1e6, 1e6, 1e6)) }, n: { value: 0 }, hw: { value: 7 } };
+function withTrench(mat) {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    if (prev) prev(sh, r);
+    sh.uniforms.uTSeg = TRENCH.segs; sh.uniforms.uTN = TRENCH.n; sh.uniforms.uTHW = TRENCH.hw;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vTw;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTw = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vTw;\nuniform vec4 uTSeg[48];\nuniform int uTN;\nuniform float uTHW;')
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        for (int i = 0; i < 48; i++) { if (i >= uTN) break; vec2 a = uTSeg[i].xy, b = uTSeg[i].zw, pq = vTw.xz - a, ab = b - a;
+          float h = clamp(dot(pq, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0); if (length(pq - ab * h) < uTHW) discard; }`);
+  };
+  mat.customProgramCacheKey = () => 'trench' + (mat.uuid);
+  return mat;
+}
+const trenchMesh = new THREE.Mesh(new THREE.BufferGeometry(), capMat); trenchMesh.visible = false; trenchMesh.frustumCulled = false; groups.ground.add(trenchMesh);
+const routes = {}; // name -> [[x,y],...] model coords (pipe routes that can be trenched)
+function resample2(pts, step) { const out = [pts[0]]; let acc = 0; for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]); acc += L; if (acc >= step || i === pts.length - 1) { out.push(b); acc = 0; } } return out; }
+function setTrenches(names, depth = 11, hw = 9) {
+  const lines = (names || []).map(n => routes[n]).filter(Boolean);
+  TRENCH.hw.value = hw;
+  const plen = l => l.reduce((a, p, i) => i ? a + Math.hypot(p[0] - l[i - 1][0], p[1] - l[i - 1][1]) : 0, 0);
+  const total = lines.reduce((a, l) => a + plen(l), 0);
+  const segs = []; lines.forEach(l => { const step = Math.max(6, total / 44); const r = resample2(l, step); for (let i = 1; i < r.length; i++) segs.push([r[i - 1], r[i]]); });
+  segs.slice(0, 48).forEach(([a, b], i) => TRENCH.segs.value[i].set(a[0], -a[1], b[0], -b[1]));
+  TRENCH.n.value = Math.min(48, segs.length);
+  trenchMesh.visible = segs.length > 0;
+  if (!segs.length) return;
+  // walls + floor along each line (offset left/right), strata on the faces
+  const pos = [], nor = [], srf = [], idx = [];
+  const strip = (pts, side) => {
+    const base = pos.length / 3;
+    pts.forEach((p, i) => {
+      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+      const nx = -dy / L * side, ny = dx / L * side, x = p[0] + nx * hw * .98, y = p[1] + ny * hw * .98, h = hAt(x, y);
+      pos.push(x, h, -y, x, h - depth, -y); nor.push(-nx, 0, ny, -nx, 0, ny); srf.push(h, h);
+      if (i) { const k = base + (i - 1) * 2; idx.push(k, k + 1, k + 2, k + 2, k + 1, k + 3); }
+    });
+  };
+  const floor = pts => {
+    const base = pos.length / 3;
+    pts.forEach((p, i) => {
+      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+      [1, -1].forEach(sd => { const x = p[0] + nx * hw * sd, y = p[1] + ny * hw * sd, h = hAt(p[0], p[1]); pos.push(x, h - depth, -y); nor.push(0, 1, 0); srf.push(h); });
+      if (i) { const k = base + (i - 1) * 2; idx.push(k, k + 1, k + 2, k + 2, k + 1, k + 3); }
+    });
+  };
+  lines.forEach(l => { const r = resample2(l, 4); strip(r, 1); strip(r, -1); floor(r); });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute('surf', new THREE.Float32BufferAttribute(srf, 1)); g.setIndex(idx);
+  trenchMesh.geometry.dispose(); trenchMesh.geometry = g;
+}
+
+// ---------- flowing pipes: liquid / energy moving inside a see-through pipe ----------
+function flowMaterial(color, { rep = 1, spd = 1, glow = 1.1, op } = {}) {
+  const m = new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(.5), emissive: color, emissiveIntensity: 1, roughness: .35, metalness: .05, transparent: op != null, opacity: op ?? 1 });
+  m.userData.u = { uRep: { value: rep }, uSpd: { value: spd }, uGlow: { value: glow } };
+  m.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, m.userData.u, { uTime });
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float flowu;\nvarying float vFu;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvFu = flowu;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vFu;\nuniform float uRep, uSpd, uGlow, uTime;')
+      .replace('vec3 totalEmissiveRadiance = emissive;', 'float st = fract(vFu * uRep - uTime * uSpd); float pulse = smoothstep(0.35, 0.8, st) * (1.0 - smoothstep(0.86, 1.0, st));\nvec3 totalEmissiveRadiance = emissive * (0.4 + uGlow * pulse);');
+  };
+  m.customProgramCacheKey = () => 'flow';
+  return m;
+}
+const glassMat = new THREE.MeshStandardMaterial({ color: '#E9F1F4', roughness: .1, metalness: .1, transparent: true, opacity: .12, depthWrite: false, side: THREE.DoubleSide });
+function pipe(group, pts, radius, key, { speed = 14, stops = null, shell = true, seg } = {}) {
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', .1);
+  const L = curve.getLength();
+  const g = new THREE.TubeGeometry(curve, seg || Math.min(600, Math.max(24, Math.round(L / 3))), radius, 10, false);
+  const uv = g.attributes.uv, fu = new Float32Array(uv.count); for (let i = 0; i < uv.count; i++) fu[i] = uv.getX(i); g.setAttribute('flowu', new THREE.BufferAttribute(fu, 1));
+  const color = LEGEND[key] ? LEGEND[key][1] : key;
+  const core = new THREE.Mesh(g, flowMaterial(color, { rep: L / 16, spd: speed / 16 }));
+  group.add(core);
+  if (shell) { const sh = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(300, Math.max(16, Math.round(L / 6))), radius * 1.5, 10, false), glassMat); group.add(sh); }
+  flowReg.push({ inst: core, key, stops, ov: false, group, phys: true });
+  return core;
+}
+// a ray of energy (sunlight) — additive glowing beam with pulses moving along it
+const rayMat = color => new THREE.ShaderMaterial({
+  uniforms: { uTime, uC: { value: new THREE.Color(color) } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  fragmentShader: 'uniform float uTime; uniform vec3 uC; varying vec2 vUv; void main(){ float s = fract(vUv.y*5.0 + uTime*0.9); float p = smoothstep(0.6,0.95,s)*(1.0-smoothstep(0.95,1.0,s)); float a = (0.10 + 0.6*p) * smoothstep(0.0,0.03,vUv.y) * (1.0 - smoothstep(0.7,1.0,vUv.y)); gl_FragColor = vec4(uC*(0.6+0.8*p), a); }'
+});
+function ray(group, from, to, color, r0 = .7, r1 = 1.8) {
+  const d = new THREE.Vector3().subVectors(to, from), L = d.length();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r0, L, 10, 1, true), rayMat(color));
+  m.position.copy(from).addScaledVector(d, .5); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), d.normalize());
+  group.add(m); return m;
+}
+// a point below the ground surface
+const B = (x, y, d) => W(x, y, hAt(x, y) - d);
+
 // ---------- callouts ----------
 const callouts = {};
 function callout(group, id, pos, opts = {}) {
@@ -408,20 +509,37 @@ function place(group, pos, text, main) {
 }
 
 // ---------- site surface: paving, basins, boardwalk ----------
+// a polygon laid onto the terrain (grid cells inside the outline, each corner at ground height)
+function drapePoly(pts, mat, lift = .4, cell = 5) {
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const pos = [];
+  for (let x = x0; x < x1; x += cell) for (let y = y0; y < y1; y += cell) {
+    if (!inPoly(x + cell / 2, y + cell / 2, pts)) continue;
+    const q = [[x, y], [x + cell, y], [x + cell, y + cell], [x, y + cell]].map(([u, v]) => [u, hAt(u, v) + lift, -v]);
+    [0, 2, 1, 0, 3, 2].forEach(k => pos.push(...q[k]));
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals();
+  const m = new THREE.Mesh(g, mat); m.receiveShadow = true; return m;
+}
 function flatPoly(pts, color, lift = 0.4, opts = {}) {
-  const geo = new THREE.ShapeGeometry(shapeFrom(pts)); geo.rotateX(-Math.PI / 2);
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, clipIntersection: true });
-  const m = new THREE.Mesh(geo, mat); m.position.y = lift; m.receiveShadow = true;
-  if (opts.ground !== false) groundMats.push(mat);
-  return m;
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, clipIntersection: true, side: THREE.DoubleSide });
+  if (opts.ground !== false) { groundMats.push(mat); withTrench(mat); }
+  if (opts.flat) { const geo = new THREE.ShapeGeometry(shapeFrom(pts)); geo.rotateX(-Math.PI / 2); const m = new THREE.Mesh(geo, mat); m.position.y = lift; m.receiveShadow = true; return m; }
+  return drapePoly(pts, mat, lift);
 }
 {
   groups.site.add(flatPoly(lot, '#BDB7AC'));
   groups.site.add(flatPoly(site.parkingDropoff, '#BDB7AC'));
   site.basins.forEach(b => groups.site.add(flatPoly(b, '#7FAE9B', .45)));
   // road
-  const rd = site.chateauRoad.filter(p => p[0] < X1 && p[1] < Y1).map(p => W(p[0], p[1], ground(p[0], p[1]) + 0.8));
-  const road = tube(rd, 12, std('#A19E96', { r: 1 })); road.scale.y = 1; groups.site.add(road);
+  { const pts = new THREE.CatmullRomCurve3(site.chateauRoad.map(p => new THREE.Vector3(p[0], 0, p[1]))).getSpacedPoints(160).filter(p => p.x < X1 && p.z < Y1 && p.x > X0 && p.z > Y0);
+    const pos = []; pts.forEach((p, i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], dx = b.x - a.x, dy = b.z - a.z, L = Math.hypot(dx, dy) || 1, nx = -dy / L * 12, ny = dx / L * 12;
+      const l = [p.x + nx, p.z + ny], r = [p.x - nx, p.z - ny]; pos.push(l, r); });
+    const v = []; for (let i = 1; i < pts.length; i++) { const [l0, r0] = [pos[(i - 1) * 2], pos[(i - 1) * 2 + 1]], [l1, r1] = [pos[i * 2], pos[i * 2 + 1]]; [l0, r0, l1, l1, r0, r1].forEach(q => v.push(q[0], hAt(q[0], q[1]) + .5, -q[1])); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); g.computeVertexNormals();
+    const rm = new THREE.MeshStandardMaterial({ color: '#A19E96', roughness: 1, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); groundMats.push(rm); withTrench(rm);
+    const road = new THREE.Mesh(g, rm); road.receiveShadow = true; groups.site.add(road); }
   // maintenance & land stewardship building
   const om = new THREE.Mesh(new THREE.BoxGeometry(64, 16, 38), std('#CFC6B4', { r: .9 })); om.position.copy(W(site.omBldg[0] - 12, site.omBldg[1] + 6, 8)); om.rotation.y = .7; om.castShadow = true; groups.site.add(om);
 }
@@ -440,7 +558,7 @@ const roofParts = [];
   // Building and landscape from the CampusMap model, registered to the drawings' frame (tools/export.mjs)
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
   const gltf = await loader.loadAsync('assets/models/campus.glb');
-  const M = (c, o = {}) => { const m = new THREE.MeshStandardMaterial({ color: c, roughness: o.r ?? .85, metalness: o.m ?? 0, side: THREE.DoubleSide, clipIntersection: true, transparent: !!o.op, opacity: o.op ?? 1 }); (o.ground ? clipWithGround : bMats).push(m); return m; };
+  const M = (c, o = {}) => { const m = new THREE.MeshStandardMaterial({ color: c, roughness: o.r ?? .85, metalness: o.m ?? 0, side: THREE.DoubleSide, clipIntersection: true, transparent: !!o.op, opacity: o.op ?? 1 }); if (o.ground) { clipWithGround.push(m); withTrench(m); } else bMats.push(m); return m; };
   const CM = {
     plants: M('#7D8F52', { r: 1 }), roofEdge: M('#6E5A45'), walls: mats.body, glass: M('#9FB6C2', { r: .2, m: .4, op: .75 }),
     wood: M('#9B7651', { r: .8, ground: true }), path: M('#CFC6B3', { r: 1, ground: true }), people: M('#4E5257', { r: .9, ground: true }), rock: M('#A89B8C', { ground: true }), metal: M('#6F747A', { m: .4, r: .5, ground: true })
@@ -465,6 +583,18 @@ const roofParts = [];
     o.castShadow = true; o.receiveShadow = true;
   });
   groups.building.add(gltf.scene);
+  // CampusMap keeps its ground flat; lay paths, the Boardwalk and people onto the real terrain
+  gltf.scene.updateMatrixWorld(true);
+  const drape = [];
+  gltf.scene.traverse(o => { if (o.isMesh && !o.isInstancedMesh && clipWithGround.includes(o.material)) drape.push(o); });
+  drape.forEach(o => {
+    const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i); p.setY(i, p.getY(i) + hAt(x, -z) + .77); }
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, o.material); m.castShadow = o.castShadow; m.receiveShadow = true;
+    o.parent.remove(o); groups.site.add(m);
+  });
   footprints.forEach(fp => { const g = new THREE.ShapeGeometry(shapeFrom(fp)); g.rotateX(-Math.PI / 2); const m = new THREE.Mesh(g, mats.floor); m.position.y = 0.25; m.receiveShadow = true; groups.building.add(m); });
 }
 // interior group: things you only see when the building is cut open
@@ -476,7 +606,7 @@ const mech = new THREE.Group(); interior.add(mech);
 const eqPos = {};
 {
   // room slab + low walls (dollhouse)
-  const slab = flatPoly(MR.corners, '#C9C6BF', 0.5, { ground: false }); slab.material.clipIntersection = false; mech.add(slab);
+  const slab = flatPoly(MR.corners, '#C9C6BF', 0.5, { ground: false, flat: true }); slab.material.clipIntersection = false; mech.add(slab);
   const wallMat = std('#EFE9DC', { r: .9, side: THREE.DoubleSide });
   for (let i = 0; i < 4; i++) {
     const a = MR.corners[i], b = MR.corners[(i + 1) % 4], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -593,7 +723,7 @@ const COOL = '#4E9BD6', WARM = '#F07F3C';
     geo.rotateX(-Math.PI / 2);
     const uv = geo.attributes.uv; // planar uv in feet
     for (let i = 0; i < uv.count; i++) { const x = geo.attributes.position.getX(i), z = geo.attributes.position.getZ(i); uv.setXY(i, x, z); }
-    const m = new THREE.Mesh(geo, panelMat); m.position.y = h; m.castShadow = true; groups.site.add(m);
+    const gz = hAt(...centroid(poly)); const m = new THREE.Mesh(geo, panelMat); m.position.y = gz + h; m.castShadow = true; groups.site.add(m);
     if (!small) {
       // posts along the long axis
       const c = centroid(poly); let far = poly[0]; poly.forEach(p => { if (Math.hypot(p[0] - c[0], p[1] - c[1]) > Math.hypot(far[0] - c[0], far[1] - c[1])) far = p; });
@@ -602,95 +732,87 @@ const COOL = '#4E9BD6', WARM = '#F07F3C';
       for (let k = -n; k <= n; k++) {
         const px = c[0] + a[0] * k * (L * .85 / n), py = c[1] + a[1] * k * (L * .85 / n);
         if (!inPoly(px, py, poly)) continue;
-        const post = new THREE.Mesh(new THREE.BoxGeometry(1.2, h, 1.2), timber); post.position.copy(W(px, py, h / 2)); post.castShadow = true; groups.site.add(post);
+        const post = new THREE.Mesh(new THREE.BoxGeometry(1.2, h, 1.2), timber); post.position.copy(W(px, py, gz + h / 2)); post.castShadow = true; groups.site.add(post);
       }
-      const ridge = new THREE.Mesh(new THREE.BoxGeometry(L * 1.8, 1.4, 1.4), timber); ridge.position.copy(W(c[0], c[1], h - .7)); ridge.rotation.y = Math.atan2(a[1], a[0]); groups.site.add(ridge);
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(L * 1.8, 1.4, 1.4), timber); ridge.position.copy(W(c[0], c[1], gz + h - .7)); ridge.rotation.y = Math.atan2(a[1], a[0]); groups.site.add(ridge);
     }
   });
-  callout(E, 'pv', W(pvC[0], pvC[1], 30));
-  // sunlight onto panels
-  const sunPaths = [];
-  site.pv.slice().sort((a, b) => polyArea(b) - polyArea(a)).slice(0, 5).forEach(poly => { const c = centroid(poly); for (let j = 0; j < 3; j++) { const dx = (j - 1) * 16; sunPaths.push([W(c[0] - 240 + dx, c[1] + 140, 400), W(c[0] + dx * .3, c[1], 17)]); } });
-  flows(E, sunPaths, 'sun', { stops: ['solar', 'goal'], ov: true, spacing: 70, speed: 120, size: 2.2, glow: 1.4 });
-  // power to the building
-  flows(E, [smooth([W(pvC[0], pvC[1], 12), W(pvC[0] - 140, pvC[1] + 120, 3), W(560, 60, 3), W(430, 70, 4)])], 'solar', { stops: ['solar', 'goal'], ov: true, spacing: 22, speed: 50 });
+  callout(E, 'pv', W(pvC[0], pvC[1], hAt(...pvC) + 30));
+  // sunlight onto the panels: glowing rays
+  const rays = new THREE.Group(); E.add(rays);
+  site.pv.slice().sort((a, b) => polyArea(b) - polyArea(a)).slice(0, 6).forEach(poly => {
+    const c = centroid(poly), gz = hAt(...c);
+    for (let j = 0; j < 3; j++) { const dx = (j - 1) * 18, dy = (j - 1) * -8; ray(rays, W(c[0] - 260 + dx, c[1] + 150 + dy, gz + 430), W(c[0] + dx * .4, c[1] + dy * .4, gz + 16), '#FFC94D'); }
+  });
+  flowReg.push({ inst: rays, key: 'sun', stops: ['solar', 'goal'], ov: true, group: E });
+  // power from the canopies to the building, in a buried conduit
+  routes.solarFeed = [[pvC[0], pvC[1]], [pvC[0] - 150, pvC[1] + 110], [600, 40], [500, 70], [455, 80]];
+  pipe(E, smooth(routes.solarFeed.map(([x, y]) => B(x, y, 4)), 6), 1.8, 'solar', { speed: 40, stops: ['solar', 'goal'] });
 
   // ---- geothermal wells (M001: 216 boreholes, 300 ft) ----
   const DEPTH = sys.wellDepth;
   const n = allWells.length;
-  const grout = new THREE.InstancedMesh(new THREE.CylinderGeometry(2.4, 2.4, DEPTH, 10, 1, true), std('#8C8B86', { op: .38, dw: false, side: THREE.DoubleSide }), n);
-  const pipeG = new THREE.CylinderGeometry(.75, .75, DEPTH, 6);
-  const down = new THREE.InstancedMesh(pipeG, std(COOL, { e: .35, r: .4 }), n);
-  const up = new THREE.InstancedMesh(pipeG, std(WARM, { e: .35, r: .4 }), n);
-  const bend = new THREE.InstancedMesh(new THREE.TorusGeometry(1.1, .75, 6, 12, Math.PI), std('#C98A6E', { e: .2 }), n);
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s1 = new THREE.Vector3(1, 1, 1);
+  const grout = new THREE.InstancedMesh(new THREE.CylinderGeometry(2.4, 2.4, DEPTH, 10, 1, true), std('#8C8B86', { op: .32, dw: false, side: THREE.DoubleSide }), n);
+  const pipeG = new THREE.CylinderGeometry(.8, .8, DEPTH, 6, 1, false);
+  { const uv = pipeG.attributes.uv, fu = new Float32Array(uv.count); for (let i = 0; i < uv.count; i++) fu[i] = uv.getY(i); pipeG.setAttribute('flowu', new THREE.BufferAttribute(fu, 1)); }
+  const down = new THREE.InstancedMesh(pipeG, flowMaterial(LEGEND.loopOut[1], { rep: DEPTH / 18, spd: -1.2 }), n);
+  const up = new THREE.InstancedMesh(pipeG, flowMaterial(LEGEND.loopBack[1], { rep: DEPTH / 18, spd: 1.2 }), n);
+  const bend = new THREE.InstancedMesh(new THREE.TorusGeometry(1.1, .8, 6, 12, Math.PI), std('#C98A6E', { e: .2 }), n);
+  const q = new THREE.Quaternion(), s1 = new THREE.Vector3(1, 1, 1);
   allWells.forEach(([x, y], i) => {
-    const top = -5, mid = top - DEPTH / 2;
+    const top = hAt(x, y) - 5, mid = top - DEPTH / 2;
     m4.makeTranslation(x, mid, -y); grout.setMatrixAt(i, m4);
     m4.makeTranslation(x - 1.1, mid, -y); down.setMatrixAt(i, m4);
     m4.makeTranslation(x + 1.1, mid, -y); up.setMatrixAt(i, m4);
     q.setFromEuler(new THREE.Euler(0, 0, Math.PI)); m4.compose(new THREE.Vector3(x, top - DEPTH, -y), q, s1); bend.setMatrixAt(i, m4);
   });
   [grout, down, up, bend].forEach(m => { m.frustumCulled = false; E.add(m); });
-  // flow inside wells inside the pit
+  flowReg.push({ inst: down, key: 'loopOut', stops: ['wells'], phys: true }, { inst: up, key: 'loopBack', stops: ['wells'], phys: true });
   const pitStop = LAYERS.energy.stops.find(s => s.id === 'wells');
   const { u: pu, v: pv, c0: pc0 } = cutFrame(pitStop.cut.c, pitStop.cut.ang, pitStop.cut.l, pitStop.cut.w, pitStop.cut.c0);
   const inPit = ([x, y]) => { const s = (x - pc0[0]) * pu[0] + (y - pc0[1]) * pu[1], t = (x - pc0[0]) * pv[0] + (y - pc0[1]) * pv[1]; return s > 0 && s < pitStop.cut.l && t > 0 && t < pitStop.cut.w; };
   const pitWells = allWells.filter(inPit);
-  flows(E, pitWells.map(([x, y]) => [W(x - 1.1, y, -5), W(x - 1.1, y, -5 - DEPTH)]), 'loopOut', { stops: ['wells'], ov: false, spacing: 26, speed: 22, size: 1.5 });
-  flows(E, pitWells.map(([x, y]) => [W(x + 1.1, y, -5 - DEPTH), W(x + 1.1, y, -5)]), 'loopBack', { stops: ['wells'], ov: false, spacing: 26, speed: 22, size: 1.5 });
-  // depth ruler on the pit's far corner
-  const rc = [pc0[0] + pu[0] * 3 + pv[0] * 3, pc0[1] + pu[1] * 3 + pv[1] * 3];
-  [100, 200].forEach(d => { const el = document.createElement('div'); el.className = 'ruler'; el.textContent = `${d} ft`; const o = new CSS2DObject(el); o.position.copy(W(rc[0], rc[1], -d)); E.add(o); (callouts.depth ||= []).push(o); o.visible = false; el.style.display = 'none'; });
-  callout(E, 'depth', W(rc[0], rc[1], -DEPTH - 5));
+  // depth ruler on the pit's corner
+  const rc = [pc0[0] + pu[0] * 3 + pv[0] * 3, pc0[1] + pu[1] * 3 + pv[1] * 3], g0 = hAt(...rc);
+  [100, 200].forEach(d => { const el = document.createElement('div'); el.className = 'ruler'; el.textContent = `${d} ft`; const o = new CSS2DObject(el); o.position.copy(W(rc[0], rc[1], g0 - d)); E.add(o); (callouts.depth ||= []).push(o); o.visible = false; el.style.display = 'none'; });
+  callout(E, 'depth', W(rc[0], rc[1], g0 - DEPTH - 5));
   const fp = d => [pc0[0] + pu[0] * d + pv[0], pc0[1] + pu[1] * d + pv[1]];
   callout(E, 'sb', W(...fp(330), -28)); callout(E, 'clk', W(...fp(400), (SB_BASE + CLK_BASE) / 2)); callout(E, 'bc', W(...fp(330), -190));
-  if (pitWells.length) { const w0 = pitWells.reduce((a, b) => Math.hypot(b[0] - rc[0], b[1] - rc[1]) < Math.hypot(a[0] - rc[0], a[1] - rc[1]) ? b : a); callout(E, 'loop', W(w0[0] + 1, w0[1], -60)); }
+  if (pitWells.length) { const w0 = pitWells.reduce((a, b) => Math.hypot(b[0] - rc[0], b[1] - rc[1]) < Math.hypot(a[0] - rc[0], a[1] - rc[1]) ? b : a); callout(E, 'loop', W(w0[0] + 1, w0[1], hAt(...w0) - 60)); }
 
   // ---- circuits: rows of wells -> vault (M001) ----
-  const pipeMat = std('#6B7C8C', { r: .5 });
   const vault = sys.vault;
-  const rowGeos = [];
-  const circuitPaths = [];
   sys.wellRows.forEach(row => {
     const a = row[0], b = row[row.length - 1];
     const near = Math.hypot(a[0] - vault[0], a[1] - vault[1]) < Math.hypot(b[0] - vault[0], b[1] - vault[1]) ? row.slice() : row.slice().reverse();
-    const pts = [W(vault[0], vault[1], -6), W((vault[0] + near[0][0]) / 2, (vault[1] + near[0][1]) / 2, -6), ...near.map(p => W(p[0], p[1], -5))];
-    const curvePts = smooth(pts, 4);
-    rowGeos.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(curvePts), curvePts.length, .9, 5));
-    circuitPaths.push(curvePts.map(p => p.clone().add(new THREE.Vector3(0, .9, 0))));
+    const pts = [B(vault[0], vault[1], 6), B((vault[0] + near[0][0]) / 2, (vault[1] + near[0][1]) / 2, 6), ...near.map(p => B(p[0], p[1], 5))];
+    pipe(E, smooth(pts, 4), .9, 'loopBack', { speed: 10, stops: ['circuits'], shell: false });
   });
-  E.add(new THREE.Mesh(mergeGeometries(rowGeos), pipeMat));
-  flows(E, circuitPaths, 'loopBack', { stops: ['circuits'], ov: false, spacing: 40, speed: 30, size: 1.6 });
-  const vbox = new THREE.Mesh(new THREE.BoxGeometry(16, 9, 12), std('#8F969C', { r: .6 })); vbox.position.copy(W(vault[0], vault[1], -6)); vbox.rotation.y = 108 * D2R; E.add(vbox);
-  callout(E, 'vault', W(vault[0], vault[1], 4));
+  const vbox = new THREE.Mesh(new THREE.BoxGeometry(16, 9, 12), std('#8F969C', { r: .6 })); vbox.position.copy(B(vault[0], vault[1], 6)); vbox.rotation.y = 108 * D2R; E.add(vbox);
+  callout(E, 'vault', W(vault[0], vault[1], hAt(...vault) + 4));
 
   // ---- the mains: vault -> mechanical room (two 6" pipes) ----
   const hd = sys.header.map(p => [p[0], p[1]]);
+  routes.header = hd;
   const off = (pts, o) => pts.map((p, i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]; const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1; return [p[0] - dy / L * o, p[1] + dx / L * o]; });
   const entry = [MR.corners[0][0] - 6, MR.corners[0][1] - 4];
-  const supply = [...off(hd, 2).reverse().map(p => W(p[0], p[1], -6))]; // vault -> plant
-  const ret = off(hd, -2).map(p => W(p[0], p[1], -6));                    // plant -> vault
-  const sIn = [...supply, W(entry[0], entry[1], -6), W(entry[0], entry[1], 2)];
-  const rOut = [W(entry[0] + 3, entry[1] - 2, 2), W(entry[0] + 3, entry[1] - 2, -6), ...ret];
-  E.add(tube(sIn, 1.3, std(WARM, { e: .3 }), 300));
-  E.add(tube(rOut, 1.3, std(COOL, { e: .3 }), 300));
-  flows(E, [sIn], 'loopBack', { stops: ['circuits', 'header', 'plant'], ov: false, spacing: 18, speed: 40, size: 1.7 });
-  flows(E, [rOut], 'loopOut', { stops: ['circuits', 'header', 'plant'], ov: false, spacing: 18, speed: 40, size: 1.7 });
-  callout(E, 'mains', W(...P.headerMid.slice(0, 2), 2));
-  // plant -> manifold -> heat pumps
+  const sIn = [...off(hd, 3).reverse().map(p => B(p[0], p[1], 6)), B(entry[0], entry[1], 6), W(entry[0], entry[1], 2)];
+  const rOut = [W(entry[0] + 3, entry[1] - 2, 2), B(entry[0] + 3, entry[1] - 2, 6), ...off(hd, -3).map(p => B(p[0], p[1], 6))];
+  pipe(E, sIn, 2.2, 'loopBack', { speed: 22, stops: ['circuits', 'header', 'plant'] });
+  pipe(E, rOut, 2.2, 'loopOut', { speed: 22, stops: ['circuits', 'header', 'plant'] });
+  callout(E, 'mains', B(...P.headerMid.slice(0, 2), -3));
+  // plant -> manifold -> heat pumps and chiller
   const hp = MR.equipment.filter(e => e.kind === 'hp' && e.tag.startsWith('WWHP')).map(e => W(e.at[0], e.at[1], 3));
-  flows(E, [[W(entry[0], entry[1], 3), ...hp, eqPos['CH-1'].clone().setY(3)]], 'loopBack', { stops: ['plant'], ov: false, spacing: 6, speed: 12, size: .9 });
-  // tunnel to west building + radiant loop
-  const tun = tube(tunnelPts, 4.5, std('#BDB6A8', { op: .45, dw: false, side: THREE.DoubleSide }), 40); E.add(tun);
-  flows(E, [tunnelPts.map(p => p.clone().add(new THREE.Vector3(0, -1, 1.5)))], 'heatingWater', { stops: ['radiant', 'plant'], ov: false, spacing: 10, speed: 22, size: 1.1 });
-  flows(E, [tunnelPts.slice().reverse().map(p => p.clone().add(new THREE.Vector3(0, -1, -1.5)))], 'coolingWater', { stops: ['radiant', 'plant'], ov: false, spacing: 10, speed: 22, size: 1.1 });
-  // grid line from the road
-  const gp = site.chateauRoad.filter(p => p[0] < X1 - 20 && p[1] < Y1 - 20).slice(0, 3).map(p => W(p[0], p[1], ground(p[0], p[1]) + 32));
-  gp.push(W(lotC[0] + 60, lotC[1] + 40, 26), W(470, 60, 22));
-  E.add(tube(gp, 1, std('#7B7F86')));
+  pipe(E, [W(entry[0], entry[1], 3), ...hp, eqPos['CH-1'].clone().setY(3)], .7, 'loopBack', { speed: 8, stops: ['plant'], shell: false });
+  // tunnel to the west building, with warm and chilled water lines inside
+  const tun = tube(tunnelPts, 4.5, std('#BDB6A8', { op: .4, dw: false, side: THREE.DoubleSide }), 40); E.add(tun);
+  pipe(E, tunnelPts.map(p => p.clone().add(new THREE.Vector3(0, -1, 1.6))), .8, 'heatingWater', { speed: 14, stops: ['radiant', 'plant'], shell: false });
+  pipe(E, tunnelPts.slice().reverse().map(p => p.clone().add(new THREE.Vector3(0, -1, -1.6))), .8, 'coolingWater', { speed: 14, stops: ['radiant', 'plant'], shell: false });
+  // grid line from the road, power pulsing along the wire
+  const gp = site.chateauRoad.filter(p => p[0] < X1 - 20 && p[1] < Y1 - 20).slice(0, 3).map(p => W(p[0], p[1], hAt(p[0], p[1]) + 32));
+  gp.push(W(lotC[0] + 60, lotC[1] + 40, hAt(lotC[0] + 60, lotC[1] + 40) + 26), W(470, 60, 22));
+  pipe(E, gp, .9, 'grid', { speed: 60, stops: ['goal'], shell: false });
   gp.slice(0, 4).forEach(p => { const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.6, 34), std('#7a5d3e')); pole.position.set(p.x, p.y - 16, p.z); E.add(pole); });
-  flows(E, [gp], 'grid', { stops: ['goal'], ov: true, spacing: 50, speed: 60, size: 2.2, glow: .6 });
 }
 // equipment callouts (shared by energy & water)
 ['WWHP-2', 'CH-1', 'HPLP-1', 'DWH-1', 'B-1', 'AHU-1'].forEach(t => eqPos[t] && callout(E, t, eqPos[t], { left: ['HPLP-1', 'B-1', 'AHU-1'].includes(t) }));
@@ -701,77 +823,158 @@ Object.values(specimens).forEach(sp => Object.entries(sp.lab).forEach(([id, p]) 
 
 // ---------- WATER ----------
 const H2O = groups.water;
-const PURPLE = '#7C6FD0', BLUE = '#3B9BD6', BROWN = '#9A8A6A', TEAL = '#3FB3A6';
+const PURPLE = '#7C6FD0', BLUE = '#3B9BD6';
 {
   // process tanks (C510) + approximate drinking-water and fire/recycled tanks in the same berm
   const pt = sys.processTanks.map(([a, b]) => ({ a, b, c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }));
   const axis = (() => { const d = [pt[0].b[0] - pt[0].a[0], pt[0].b[1] - pt[0].a[1]]; const L = Math.hypot(...d); return [d[0] / L, d[1] / L]; })();
   const step = [pt[1].c[0] - pt[0].c[0], pt[1].c[1] - pt[0].c[1]];
-  const capsule = (c, r, len, color, z) => { const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 6, 20), std(color, { r: .45, e: .15 })); m.rotation.z = Math.PI / 2; const g = new THREE.Group(); g.add(m); g.position.copy(W(c[0], c[1], z)); g.rotation.y = Math.atan2(axis[1], axis[0]); g.traverse(o => o.castShadow = true); H2O.add(g); return g; };
-  pt.forEach(t => capsule(t.c, 5, Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1]) - 10, '#B79A6B', -9));
+  const capsule = (c, r, len, color, d) => { const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 6, 20), std(color, { r: .45, e: .15 })); m.rotation.z = Math.PI / 2; const g = new THREE.Group(); g.add(m); g.position.copy(B(c[0], c[1], d)); g.rotation.y = Math.atan2(axis[1], axis[0]); g.traverse(o => o.castShadow = true); H2O.add(g); return g; };
+  pt.forEach(t => capsule(t.c, 5, Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1]) - 10, '#B79A6B', 9));
   const potC = [pt[2].c[0] + step[0] * 1.3, pt[2].c[1] + step[1] * 1.3], npC = [pt[2].c[0] + step[0] * 2.75, pt[2].c[1] + step[1] * 2.75];
-  capsule(potC, 5, 19, BLUE, -9);
-  capsule(npC, 6, 39, PURPLE, -10);
-  const lift = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 16, 18), std('#8E8A82')); lift.position.copy(W(sys.liftStation[0], sys.liftStation[1], -8)); H2O.add(lift);
-  callout(H2O, 'proc', W(pt[1].c[0], pt[1].c[1], -2));
-  callout(H2O, 'potable', W(potC[0], potC[1], -2));
-  callout(H2O, 'np', W(npC[0], npC[1], -2), { left: true });
-  callout(H2O, 'lift', W(sys.liftStation[0], sys.liftStation[1], 2));
+  capsule(potC, 5, 19, BLUE, 9);
+  capsule(npC, 6, 39, PURPLE, 10);
+  const lift = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 16, 18), std('#8E8A82')); lift.position.copy(B(sys.liftStation[0], sys.liftStation[1], 8)); H2O.add(lift);
+  callout(H2O, 'proc', B(pt[1].c[0], pt[1].c[1], 2));
+  callout(H2O, 'potable', B(potC[0], potC[1], 2));
+  callout(H2O, 'np', B(npC[0], npC[1], 2), { left: true });
+  callout(H2O, 'lift', B(sys.liftStation[0], sys.liftStation[1], -2));
   ['MBR', 'BREAK'].forEach(t => eqPos[t] && callout(H2O, t, eqPos[t]));
   const mbr = eqPos.MBR ? eqPos.MBR.clone().setY(3) : W(420, 90, 3);
-  // supply: road -> drinking-water tank -> building
-  const rd = site.chateauRoad.filter(p => p[0] < X1 - 20 && p[1] < Y1 - 20).slice(0, 3).reverse();
-  const supply = smooth([...rd.map(p => W(p[0], p[1], -7)), W(900, 60, -7), W(700, 150, -7), W(potC[0], potC[1], -7)], 5);
-  H2O.add(tube(supply, 1.2, std(BLUE, { e: .25 }), 200));
-  flows(H2O, [supply], 'drinking', { stops: ['pipeline', 'tanks'], ov: false, spacing: 30, speed: 30, size: 1.8 });
-  flows(H2O, [smooth([W(potC[0], potC[1], -6), W(500, 140, -4), W(430, 120, 2), W(320, 120, 3), W(200, 110, 3)], 4)], 'drinking', { stops: ['pipeline', 'reuse'], ov: false, spacing: 14, speed: 20, size: 1.5 });
-  // wastewater: building -> lift station -> process tanks -> MBR skid -> holding/non-potable tank
-  flows(H2O, [smooth([W(150, 120, 1), W(300, 130, -3), W(420, 150, -6), W(sys.liftStation[0], sys.liftStation[1], -8)], 4)], 'waste', { stops: ['tanks', 'treat', 'reuse'], ov: false, spacing: 14, speed: 14, size: 1.6 });
-  flows(H2O, [smooth([W(sys.liftStation[0], sys.liftStation[1], -6), W(pt[0].c[0], pt[0].c[1], -8), W(pt[1].c[0], pt[1].c[1], -8), W(pt[2].c[0], pt[2].c[1], -8)], 3)], 'waste', { stops: ['tanks', 'treat'], ov: false, spacing: 10, speed: 12, size: 1.6 });
-  flows(H2O, [smooth([W(pt[2].c[0], pt[2].c[1], -6), W(470, 120, -3), mbr], 3)], 'waste', { stops: ['treat'], ov: false, spacing: 8, speed: 12, size: 1.3 });
-  flows(H2O, [smooth([mbr, W(470, 110, -3), W(npC[0], npC[1], -8)], 3)], 'treated', { stops: ['treat', 'tanks'], ov: false, spacing: 8, speed: 12, size: 1.3 });
+  const bldg = (x, y) => W(x, y, 3);
+  // drinking water: road -> drinking-water tank -> building
+  const rd = site.chateauRoad.filter(p => p[0] < X1 - 20 && p[1] < Y1 - 20).slice(0, 3).reverse().map(p => [p[0], p[1]]);
+  routes.supply = [...rd, [900, 60], [700, 150], potC];
+  pipe(H2O, smooth(routes.supply.map(([x, y]) => B(x, y, 7)), 5), 2, 'drinking', { speed: 20, stops: ['pipeline', 'tanks'] });
+  pipe(H2O, smooth([B(potC[0], potC[1], 6), B(500, 140, 5), B(455, 125, 5), bldg(430, 115), bldg(320, 120), bldg(200, 110)], 4), .9, 'drinking', { speed: 14, stops: ['pipeline', 'reuse'], shell: false });
+  // wastewater: building -> lift station -> process tanks -> MBR skid -> recycled-water tank
+  pipe(H2O, smooth([bldg(150, 125), bldg(300, 135), B(420, 150, 6), B(sys.liftStation[0], sys.liftStation[1], 8)], 4), 1, 'waste', { speed: 10, stops: ['tanks', 'process', 'treat', 'reuse'], shell: false });
+  pipe(H2O, smooth([B(sys.liftStation[0], sys.liftStation[1], 7), ...pt.map(t => B(t.c[0], t.c[1], 6))], 3), .9, 'waste', { speed: 8, stops: ['tanks', 'process', 'treat'], shell: false });
+  pipe(H2O, smooth([B(pt[2].c[0], pt[2].c[1], 6), B(470, 120, 4), mbr], 3), .8, 'waste', { speed: 8, stops: ['treat', 'process'], shell: false });
+  pipe(H2O, smooth([mbr.clone().setY(4), B(470, 110, 4), B(npC[0], npC[1], 8)], 3), .8, 'treated', { speed: 8, stops: ['treat', 'tanks', 'process'], shell: false });
   // recycled water back in for flushing
-  flows(H2O, [smooth([W(npC[0], npC[1], -6), W(480, 100, -2), W(330, 80, 3), W(180, 60, 3)], 4)], 'treated', { stops: ['reuse'], ov: false, spacing: 14, speed: 18, size: 1.5 });
+  routes.recycled = [npC, [520, 120], [480, 100], [440, 92]];
+  pipe(H2O, smooth([...routes.recycled.map(([x, y]) => B(x, y, 6)), bldg(420, 90), bldg(330, 80), bldg(180, 60)], 4), 1.8, 'treated', { speed: 14, stops: ['reuse'] });
   // to the leach fields
-  const toLeach = smooth([W(npC[0], npC[1], -8), W(600, 40, -7), W(560, -150, -7), W(560, -300, -6), W(600, -400, -4)], 5);
-  H2O.add(tube(toLeach, .9, std(PURPLE, { e: .25 }), 160));
-  flows(H2O, [toLeach], 'treated', { stops: ['leach', 'tanks'], ov: false, spacing: 26, speed: 26, size: 1.6 });
-  // leach trenches (C510/C511): drain rock + perforated lateral
-  const rock = std('#C9C3B6', { r: 1 }), lat = std(PURPLE, { e: .4 });
+  routes.leachFeed = [npC, [600, 40], [560, -150], [560, -300], [600, -400]];
+  pipe(H2O, smooth(routes.leachFeed.map(([x, y]) => B(x, y, 7)), 5), 1.8, 'treated', { speed: 18, stops: ['leach', 'tanks'] });
+  // leach trenches (C510/C511): drain rock + perforated lateral with water moving through it
+  const rock = std('#C9C3B6', { r: 1 });
+  const latG = new THREE.CylinderGeometry(.5, .5, 1, 8); { const uv = latG.attributes.uv, fu = new Float32Array(uv.count); for (let i = 0; i < uv.count; i++) fu[i] = uv.getY(i); latG.setAttribute('flowu', new THREE.BufferAttribute(fu, 1)); }
   const rockI = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 2.3, 2), rock, sys.trenches.length);
-  const latI = new THREE.InstancedMesh(new THREE.CylinderGeometry(.45, .45, 1, 8), lat, sys.trenches.length);
+  const latI = new THREE.InstancedMesh(latG, flowMaterial(LEGEND.treated[1], { rep: 7, spd: .5 }), sys.trenches.length);
   sys.trenches.forEach(([a, b], i) => {
-    const L = Math.hypot(b[0] - a[0], b[1] - a[1]), c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
-    m4.compose(W(c[0], c[1], -2.85), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ang, 0)), new THREE.Vector3(L, 1, 1)); rockI.setMatrixAt(i, m4);
-    m4.compose(W(c[0], c[1], -2.1), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ang, Math.PI / 2)), new THREE.Vector3(1, L, 1)); latI.setMatrixAt(i, m4);
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]), c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], ang = Math.atan2(b[1] - a[1], b[0] - a[0]), g = hAt(...c);
+    m4.compose(W(c[0], c[1], g - 2.85), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ang, 0)), new THREE.Vector3(L, 1, 1)); rockI.setMatrixAt(i, m4);
+    m4.compose(W(c[0], c[1], g - 2.1), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ang, Math.PI / 2)), new THREE.Vector3(1, L, 1)); latI.setMatrixAt(i, m4);
   });
   [rockI, latI].forEach(m => { m.frustumCulled = false; H2O.add(m); });
   const lstop = LAYERS.water.stops.find(s => s.id === 'leach');
   const { u: lu, v: lv, c0: lc0 } = cutFrame(lstop.cut.c, lstop.cut.ang, lstop.cut.l, lstop.cut.w);
   const seeps = [];
-  sys.trenches.forEach(([a, b]) => { for (let f = .1; f < 1; f += .12) { const x = a[0] + (b[0] - a[0]) * f, y = a[1] + (b[1] - a[1]) * f; const s = (x - lc0[0]) * lu[0] + (y - lc0[1]) * lu[1], t = (x - lc0[0]) * lv[0] + (y - lc0[1]) * lv[1]; if (s > 0 && s < lstop.cut.l && t > 0 && t < lstop.cut.w) seeps.push([W(x, y, -2.4), W(x + .3, y, -4)]); } });
+  sys.trenches.forEach(([a, b]) => { for (let f = .1; f < 1; f += .12) { const x = a[0] + (b[0] - a[0]) * f, y = a[1] + (b[1] - a[1]) * f, g = hAt(x, y); const s = (x - lc0[0]) * lu[0] + (y - lc0[1]) * lu[1], t = (x - lc0[0]) * lv[0] + (y - lc0[1]) * lv[1]; if (s > 0 && s < lstop.cut.l && t > 0 && t < lstop.cut.w) seeps.push([W(x, y, g - 2.4), W(x + .3, y, g - 4)]); } });
   flows(H2O, seeps, 'soak', { stops: ['leach'], ov: false, spacing: 1, speed: .8, size: .35, glow: .8 });
-  flows(H2O, sys.trenches.map(([a, b]) => [W(a[0], a[1], -2.1), W(b[0], b[1], -2.1)]), 'treated', { stops: ['leach'], ov: false, spacing: 25, speed: 10, size: .6 });
   const tr0 = sys.trenches.reduce((best, tr) => { const c = [(tr[0][0] + tr[1][0]) / 2, (tr[0][1] + tr[1][1]) / 2]; const d = Math.hypot(c[0] - lstop.cut.c[0], c[1] - lstop.cut.c[1]); return d < best.d ? { d, c } : best; }, { d: 1e9 }).c;
-  callout(H2O, 'trench', W(tr0[0], tr0[1], -2));
-  // rain + runoff to basins
-  const rainN = MOBILE ? 220 : 520;
-  const rg = new THREE.BufferGeometry(); const rp = new Float32Array(rainN * 6);
-  const area = { x0: -250, x1: 900, y0: -600, y1: 300 };
-  const drops = Array.from({ length: rainN }, () => ({ x: area.x0 + Math.random() * (area.x1 - area.x0), y: area.y0 + Math.random() * (area.y1 - area.y0), z: Math.random() * 380 }));
-  rg.setAttribute('position', new THREE.BufferAttribute(rp, 3));
-  const rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: '#5AA9D6', transparent: true, opacity: .5 }));
+  callout(H2O, 'trench', B(tr0[0], tr0[1], 2));
+
+  // ---- rain: falls on the prairie roof; extra drains out at the foot of the building to the basins ----
+  const rainN = MOBILE ? 260 : 700;
+  const area = { x0: -60, x1: 620, y0: -420, y1: 260 };
+  const drops = Array.from({ length: rainN }, () => ({ x: area.x0 + Math.random() * (area.x1 - area.x0), y: area.y0 + Math.random() * (area.y1 - area.y0), z: Math.random() * 300 }));
+  drops.forEach(d => { const r = roofAt(d.x, d.y); d.floor = r > 5 ? r : hAt(d.x, d.y); });
+  const rain = new THREE.InstancedMesh(new THREE.BoxGeometry(.35, 8, .35), new THREE.MeshBasicMaterial({ color: '#3E8FD0', transparent: true, opacity: .85 }), rainN);
   rain.frustumCulled = false; H2O.add(rain);
   let lastT = 0;
-  const drawRain = dt => { drops.forEach((d, i) => { d.z -= dt * 260; if (d.z < 0) d.z += 380; const k = i * 6; rp[k] = d.x; rp[k + 1] = d.z; rp[k + 2] = -d.y; rp[k + 3] = d.x - 2; rp[k + 4] = d.z + 9; rp[k + 5] = -d.y; }); rg.attributes.position.needsUpdate = true; };
+  const drawRain = dt => { drops.forEach((d, i) => { d.z -= dt * 160; if (d.z < 0) d.z += 300; m4.makeTranslation(d.x, d.floor + d.z + 3.5, -d.y); rain.setMatrixAt(i, m4); }); rain.instanceMatrix.needsUpdate = true; };
   drawRain(0);
   animators.push(t => { const dt = Math.min(.05, t - lastT); lastT = t; if (rain.visible && H2O.visible && !REDUCED) drawRain(dt); });
-  const runoff = site.basins.map(b => { const c = centroid(b); const s = [Math.min(Math.max(c[0], 20), 560), Math.min(Math.max(c[1], -30), 210)]; return smooth([W(s[0], s[1], 30), W((s[0] + c[0]) / 2, (s[1] + c[1]) / 2, 4), W(c[0], c[1], 1.5)], 4); });
-  flows(H2O, runoff, 'rain', { stops: ['roof', 'basins', 'sprinklers', 'loop'], ov: true, spacing: 26, speed: 24, size: 2 });
+  // water soaking into the roof soil
+  const roofSoak = []; for (let k = 0; k < 90; k++) { const x = 20 + Math.random() * 520, y = -20 + Math.random() * 230, r = roofAt(x, y); if (r > 10) roofSoak.push([W(x, y, r + .5), W(x, y, r - 1.2)]); }
+  flows(H2O, roofSoak, 'rain', { stops: ['roof'], ov: false, spacing: .6, speed: .5, size: .45 });
+  // roof drain pipes: from the roof edge down to an outlet at the foot of the wall, then over the ground to a basin
+  const fpts = footprints[0];
+  const nearestOnFP = (x, y) => { let best = null; for (let i = 0; i < fpts.length; i++) { const a = fpts[i], b = fpts[(i + 1) % fpts.length], dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1; const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / L2)); const px = a[0] + dx * t, py = a[1] + dy * t, d = Math.hypot(px - x, py - y); if (!best || d < best.d) best = { d, p: [px, py] }; } return best.p; };
+  const runoff = [];
+  site.basins.forEach(b => {
+    const c = centroid(b); if (Math.hypot(c[0] - 280, c[1] - 90) > 520) return;
+    const e = nearestOnFP(...c), v = [c[0] - e[0], c[1] - e[1]], L = Math.hypot(...v) || 1, u = [v[0] / L, v[1] / L];
+    const inn = [e[0] - u[0] * 6, e[1] - u[1] * 6], out = [e[0] + u[0] * 5, e[1] + u[1] * 5];
+    const top = Math.max(roofAt(...inn), 12);
+    pipe(H2O, [W(...inn, top - 2), W(...inn, 2), B(...out, 1.5), W(...out, hAt(...out) + .3)], 1.5, 'rain', { speed: 10, stops: ['roof', 'basins'], seg: 30 }); if (!P.roofdrain) { P.roofdrain = [...e, Math.max(roofAt(...inn), 12) * .5]; P.roofdrainAz = Math.atan2(u[1], u[0]) / D2R; }
+    runoff.push(smooth([W(...out, hAt(...out) + .6), W((out[0] + c[0]) / 2, (out[1] + c[1]) / 2, hAt((out[0] + c[0]) / 2, (out[1] + c[1]) / 2) + .6), W(c[0], c[1], hAt(...c) + .6)], 4));
+  });
+  flows(H2O, runoff, 'rain', { stops: ['roof', 'basins', 'sprinklers', 'loop'], ov: true, spacing: 14, speed: 12, size: 1.6 });
+  callout(H2O, 'roofdrain', runoff.length ? runoff[0][0].clone().add(new THREE.Vector3(0, 4, 0)) : W(300, 0, 5));
   const bmat = new THREE.MeshBasicMaterial({ color: '#4FC0E8', transparent: true, opacity: .45, depthWrite: false }); clipWithGround.push(bmat);
-  site.basins.forEach(b => { const g = new THREE.ShapeGeometry(shapeFrom(b)); g.rotateX(-Math.PI / 2); const m = new THREE.Mesh(g, bmat); m.position.y = .7; H2O.add(m); });
+  site.basins.forEach(b => H2O.add(drapePoly(b, bmat, .7)));
   animators.push(t => { bmat.opacity = REDUCED ? .45 : .35 + .15 * Math.sin(t * 1.2); });
   H2O.userData.rain = rain;
+
+  // ---- underground detention under the east lot (C310.B, Contech system) ----
+  const DT = sys.detention, da = DT.ang * D2R, du = [Math.cos(da), Math.sin(da)], dv = [-du[1], du[0]];
+  const dg = new THREE.Group(); H2O.add(dg);
+  const gz = hAt(...DT.c), bedTop = gz - 3, chamberR = 4.2;
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(DT.l + 6, 11, DT.w + 6), std('#BDB5A6', { r: 1, op: .55, dw: false }));
+  bed.position.copy(W(DT.c[0], DT.c[1], bedTop - 5.5)); bed.rotation.y = da; dg.add(bed);
+  const cmat = std('#8F9BA6', { r: .5, m: .4, op: .6, dw: false, side: THREE.DoubleSide });
+  const wmat = flowMaterial(LEGEND.rain[1], { rep: 10, spd: .25, glow: .6 });
+  for (let k = -1; k <= 1; k++) {
+    const cc = [DT.c[0] + dv[0] * k * 9.5, DT.c[1] + dv[1] * k * 9.5];
+    const arch = new THREE.Mesh(new THREE.CylinderGeometry(chamberR, chamberR, DT.l, 20, 1, true, 0, Math.PI), cmat);
+    arch.rotation.order = 'YZX'; arch.rotation.z = Math.PI / 2; arch.rotation.y = da; arch.position.copy(W(cc[0], cc[1], bedTop - 9)); dg.add(arch);
+    const wg = new THREE.BoxGeometry(DT.l - 2, 2.2, chamberR * 1.7); { const uv = wg.attributes.uv, fu = new Float32Array(uv.count); for (let i = 0; i < uv.count; i++) fu[i] = uv.getX(i); wg.setAttribute('flowu', new THREE.BufferAttribute(fu, 1)); }
+    const water = new THREE.Mesh(wg, wmat); water.position.copy(W(cc[0], cc[1], bedTop - 8)); water.rotation.y = da; dg.add(water);
+  }
+  // inlets (dome-grate risers) and the slow-release outlet pipe
+  [-.38, .38].forEach(f => { const x = DT.c[0] + du[0] * DT.l * f + dv[0] * 18, y = DT.c[1] + du[1] * DT.l * f + dv[1] * 18; pipe(H2O, [W(x, y, hAt(x, y) + .5), B(x, y, 4), W(DT.c[0] + du[0] * DT.l * f, DT.c[1] + du[1] * DT.l * f, bedTop - 6)], .9, 'rain', { speed: 8, stops: ['detention'], seg: 20 }); });
+  const o0 = [DT.c[0] - du[0] * DT.l * .5, DT.c[1] - du[1] * DT.l * .5];
+  routes.detentionOut = [o0, [o0[0] - 60, o0[1] - 20], [o0[0] - 150, o0[1] - 30]];
+  pipe(H2O, smooth(routes.detentionOut.map(([x, y]) => B(x, y, 8)), 4), 1.6, 'rain', { speed: 4, stops: ['detention'] });
+  const dropsIn = []; for (let k = 0; k < 40; k++) { const f = Math.random() - .5, g2 = (Math.random() - .5) * DT.w; const x = DT.c[0] + du[0] * DT.l * f + dv[0] * g2, y = DT.c[1] + du[1] * DT.l * f + dv[1] * g2; dropsIn.push([W(x, y, bedTop - 4), W(x, y, bedTop - 8.5)]); }
+  flows(H2O, dropsIn, 'rain', { stops: ['detention'], ov: false, spacing: 1.5, speed: 1.4, size: .5 });
+  callout(H2O, 'detention', W(DT.c[0], DT.c[1], bedTop - 6));
+  P.detention = [DT.c[0], DT.c[1], gz - 6];
+
+  // ---- the treatment train, drawn as a diagram above the tanks (C510 process flow, C516 equipment) ----
+  const pf = new THREE.Group(); H2O.add(pf); specimens.process = { g: pf, lab: {} };
+  const tc = centroid(pt.map(t => t.c)), sd = (() => { const L = Math.hypot(...step); return [step[0] / L, step[1] / L]; })();
+  const base = hAt(...tc) + 70;
+  const STEPS = [
+    ['Lift station', 'waste', 'pump'], ['Trash trap', 'waste', 'tank'], ['Equalization', 'waste', 'tank'],
+    ['Anoxic zone', 'waste', 'tank'], ['Aerobic zone', 'waste', 'air'], ['Membranes', 'treated', 'mem'],
+    ['UV light', 'treated', 'uv'], ['Treated-water tank', 'treated', 'tank']
+  ];
+  const spacing = 30, nodes = [];
+  STEPS.forEach(([name, key, kind], i) => {
+    const off2 = -(i - (STEPS.length - 1) / 2) * spacing, x = tc[0] + sd[0] * off2, y = tc[1] + sd[1] * off2, z = base + Math.sin(i / (STEPS.length - 1) * Math.PI) * 6;
+    const g = new THREE.Group(); g.position.copy(W(x, y, z)); pf.add(g); nodes.push(W(x, y, z));
+    const col = LEGEND[key][1];
+    const vessel = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 9, 24, 1, true), std('#E8ECEE', { op: .35, dw: false, side: THREE.DoubleSide, m: .2, r: .2 }));
+    const liquid = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 4.6, kind === 'pump' ? 3 : 6, 24), std(col, { e: .35, r: .4 })); liquid.position.y = kind === 'pump' ? -3 : -1.4;
+    g.add(vessel, liquid);
+    if (kind === 'air') flows(g, Array.from({ length: 14 }, () => { const a = Math.random() * 6.28, r = Math.random() * 3.6; return [new THREE.Vector3(Math.cos(a) * r, -4.2, Math.sin(a) * r), new THREE.Vector3(Math.cos(a) * r, 1.4, Math.sin(a) * r)]; }), 'air', { stops: ['process'], ov: false, spacing: 1.2, speed: 2.4, size: .35 });
+    if (kind === 'mem') for (let k = -2; k <= 2; k++) { const pl = new THREE.Mesh(new THREE.BoxGeometry(.25, 6.5, 6.5), std('#F2F5F7', { r: .3 })); pl.position.set(k * 1.4, -.6, 0); g.add(pl); }
+    if (kind === 'uv') { const rod = new THREE.Mesh(new THREE.CylinderGeometry(.6, .6, 8, 12), std('#A27CFF', { e: 1.2 })); g.add(rod); }
+    const el = document.createElement('div'); el.className = 'co pf' + (i % 2 ? ' left' : ''); el.innerHTML = `<div class="callout"><b>${i + 1}. ${name}</b></div>`;
+    const o = new CSS2DObject(el); o.position.set(0, i % 2 ? -5 : 5.5, 0); g.add(o); (callouts['pf'] ||= []).push(o); o.visible = false; el.style.display = 'none';
+  });
+  for (let i = 1; i < nodes.length; i++) pipe(pf, [nodes[i - 1].clone().add(new THREE.Vector3(0, -2, 0)), nodes[i].clone().add(new THREE.Vector3(0, -2, 0))], .9, STEPS[i][1], { speed: 8, stops: ['process'], shell: false, seg: 16 });
+  // branches: reuse, leach fields, sludge
+  const endN = nodes[nodes.length - 1];
+  const branch = (dz, dxy, label, key) => {
+    const p2 = endN.clone().add(new THREE.Vector3(-sd[0] * dxy, dz, sd[1] * dxy));
+    pipe(pf, [endN.clone().add(new THREE.Vector3(0, -2, 0)), p2], .8, key, { speed: 8, stops: ['process'], shell: false, seg: 12 });
+    const el = document.createElement('div'); el.className = 'co pf'; el.innerHTML = `<div class="callout"><b>${label}</b></div>`;
+    const o = new CSS2DObject(el); o.position.copy(p2); pf.add(o); (callouts['pf'] ||= []).push(o); o.visible = false; el.style.display = 'none';
+  };
+  branch(12, 18, 'Flush toilets and urinals', 'treated'); branch(-14, 18, 'Leach fields', 'treated');
+  { const p1 = nodes[1].clone(), p2 = p1.clone().add(new THREE.Vector3(0, -16, 0)); pipe(pf, [p1.clone().add(new THREE.Vector3(0, -4, 0)), p2], .7, 'waste', { speed: 4, stops: ['process'], shell: false, seg: 10 });
+    const el = document.createElement('div'); el.className = 'co pf left'; el.innerHTML = '<div class="callout"><b>Sludge, hauled off site</b></div>'; const o = new CSS2DObject(el); o.position.copy(p2); pf.add(o); (callouts['pf'] ||= []).push(o); o.visible = false; el.style.display = 'none'; }
+  // dashed drops showing where the diagram sits: down to the real tanks
+  pt.forEach(t => { const a = W(t.c[0], t.c[1], base - 6), b = B(t.c[0], t.c[1], 4); const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), new THREE.LineDashedMaterial({ color: '#7d6f5c', dashSize: 2, gapSize: 2 })); l.computeLineDistances(); pf.add(l); });
+  pf.visible = false;
+  P.process = [tc[0], tc[1], base - 4];
+  { const az = Math.atan2(sd[1], sd[0]) / D2R + 90; P.processAz = az; }
 }
 
 // ---------- CARBON ----------
@@ -822,7 +1025,7 @@ function flyTo(target, pos, dur = 1.4) {
 }
 function viewFor(s) {
   const t = at(s.at); const v = s.view || { dist: 600, tilt: .9 };
-  const az = (v.az ?? 230) * D2R, el = Math.max(.12, Math.min(1.4, v.tilt)) * .78;
+  const az = (v.az === 'perp' ? P.processAz : v.az === 'drain' ? P.roofdrainAz : (v.az ?? 230)) * D2R, el = Math.max(.12, Math.min(1.4, v.tilt)) * .78;
   const dir = new THREE.Vector3(Math.cos(az) * Math.cos(el), Math.sin(el), -Math.sin(az) * Math.cos(el));
   return { t, pos: t.clone().add(dir.multiplyScalar(v.dist)) };
 }
@@ -837,11 +1040,12 @@ function resolveCut(c) { return c ? { c0: null, ...c, c: typeof c.c === 'string'
 function setCuts(stopDef) {
   const tc = resolveCut(stopDef?.cut), bc = resolveCut(stopDef?.bcut);
   const same = (a, b) => a && b && a.c[0] === b.c[0] && a.c[1] === b.c[1] && a.l === b.l && a.w === b.w;
-  if (tc) { const keep = CUT.on && same(CUT, tc); Object.assign(CUT, tc, { on: true, depth: tc.depth ?? (stopDef.id === 'wells' ? 330 : stopDef.id === 'tanks' ? 28 : stopDef.id === 'leach' ? 6 : 18) }); if (!keep) CUT.k = REDUCED ? 1 : 0; } else CUT.on = false;
+  if (tc) { const keep = CUT.on && same(CUT, tc); Object.assign(CUT, tc, { on: true, depth: (tc.depth ?? (stopDef.id === 'wells' ? 330 : stopDef.id === 'tanks' ? 26 : 18)) - hAt(...tc.c) }); if (!keep) CUT.k = REDUCED ? 1 : 0; } else CUT.on = false;
   if (bc) { const keep = BCUT.on && same(BCUT, bc) && BCUT.z === bc.z; Object.assign(BCUT, bc, { on: true }); if (!keep) BCUT.k = REDUCED ? 1 : 0; } else BCUT.on = false;
   interior.visible = !!bc || roofOff;
   section.visible = !!bc && bc.ang === 0; mech.visible = !!bc && bc.ang !== 0 || roofOff;
   Object.entries(specimens).forEach(([k, sp]) => sp.g.visible = stopDef?.specimen === k);
+  setTrenches(stopDef?.trench || null);
   updateCut(); updateBcut();
 }
 function showCallouts(list) {
@@ -851,8 +1055,9 @@ function showCallouts(list) {
 const legendEl = document.createElement('div'); legendEl.className = 'legend'; viewer.appendChild(legendEl);
 function updateFlows(id) {
   const keys = [];
-  flowReg.forEach(f => { f.inst.visible = id ? (!f.stops || f.stops.includes(id)) : f.ov; });
-  flowReg.forEach(f => { if (f.inst.visible && isShown(f.inst) && !keys.includes(f.key)) keys.push(f.key); });
+  const active = f => id ? (!f.stops || f.stops.includes(id)) : f.ov;
+  flowReg.forEach(f => { if (!f.phys) f.inst.visible = active(f); });
+  flowReg.forEach(f => { if (active(f) && isShown(f.inst) && !keys.includes(f.key)) keys.push(f.key); });
   legendEl.innerHTML = keys.length ? `<b>Moving dots</b>${keys.filter(k => LEGEND[k]).map(k => `<span><i style="--c:${LEGEND[k][1]}"></i>${LEGEND[k][0]}</span>`).join('')}` : '';
   legendEl.hidden = !keys.length;
 }

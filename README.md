@@ -36,9 +36,11 @@ Static site for GitHub Pages (no build step). three.js r160 is vendored in `asse
 - M001 Mechanical Site Plan – Geothermal (1" = 50'): 216 boreholes + 2 test bores, circuit layout, 6" HPLS/HPLR mains, vault (registration IoU 0.89). `tools/ex477.py`
 - C510 Overall Wastewater Plan (1" = 100'): leach trenches, process tanks, lift station (IoU 0.85). `tools/c510.py`; trench size/capacity from C511 notes.
 - M301 Enlarged Plans – E148 (1/4" = 1'): equipment positions; M802 schedules for CH-1, HPLP, DWH-1, B-1.
-- Building, landscape and terrain: `Theodore-Roosevelt-Presidential-Library/CampusMap` GLB, registered by roof footprint (IoU 0.92, 1 unit ≈ 33 ft). `tools/regcm.py`, `tools/terrain.py` (terrain → `terrain.bin`, 3,300 × 2,800 ft), `tools/export.mjs` (everything except the land mesh → `campus.glb`). The CampusMap model keeps the area around the building flat.
+- Building and landscape: `Theodore-Roosevelt-Presidential-Library/CampusMap` GLB, registered by roof footprint (IoU 0.92, 1 unit ≈ 33 ft). `tools/regcm.py`, `tools/export.mjs` (everything except the land mesh → `campus.glb`). Paths, the Boardwalk and people are draped onto the real terrain at load.
+- Terrain: USGS 3DEP elevation (ImageServer exportImage, ~1 m) fetched in ND South ft (EPSG:6547) and resampled to the model frame at 6 ft (`tools/build_dem.py` → `terrain.bin`, 3,800 × 2,950 ft). Georeference from the two GPS'd thermal test bores on M001 (`tools/georef_pts.json`; rotation −40.76°; 2-point scale check 0.98). Vertical datum FFE 2516.0 ft (C514) = 0. The lidar predates construction, so ground inside the building footprint is clamped below the floor; finished grading (berms, lots) is not modeled.
 - Rock layers follow the Medora-area sequence in TRPL's geology explorer (geology.labs.trlibrary.com, `#layers`): gray-brown Sentinel Butte Formation, the red HT Butte clinker band, yellow-brown Bullion Creek Formation below. The contact depths at the Library (clinker drawn about 52–84 ft below the main floor) are illustrative.
-- Moving dots are tied to stops and explained in an on-screen legend (`LEGEND` in `content.js`).
+- Moving dots are tied to stops and explained in an on-screen legend (`LEGEND` in `content.js`). Pipes are drawn as see-through tubes with the liquid or power pulsing inside; stops with `trench: [...]` open the ground along a named route (`routes` in `app.js`). Sunlight is drawn as rays.
+- Water additions: the treatment train as a labeled diagram over the process tanks (C510 process flow, C516 equipment list); roof drain outlets to the basins (C310.L note: green-roof stormwater piped to daylight within 5 ft of the building; outlet positions schematic); the Contech underground detention system under the east lot (C310.B, registered through C510; ~225 × 30 ft).
 - `tools/systems.py` assembles `systems.json` and the binaries.
 
 **Approximate locations.** The 15,000-gal and 40,000-gal tanks are placed in the east berm next to the process tanks (no drawing located yet). The mechanical room is placed along the east facade of the east building from M001/M301 and its orientation is approximate. Supply-line, leach-feed and tunnel routes are schematic. Equipment, pipe and well sizes are drawn larger than built so they read at site scale. The page notes this.
@@ -46,6 +48,7 @@ Static site for GitHub Pages (no build step). three.js r160 is vendored in `asse
 ## Before wider promotion, confirm
 - Battery/microgrid shelter-in-place is **not** shown (narrative was a draft and the microgrid was partly value-engineered). Add only once confirmed.
 - Drinking-water and fire/recycled tank positions (placed approximately in the east berm).
+- That no rainwater is reused indoors (narrative documents say so; the detention system is storm storage, not a cistern).
 - Final borehole depth (M001 conformed note says 300'; a 300 vs 350 ft study was open in 2022).
 - Formation under the site: the 2022 geotechnical report says weathered Sentinel Butte; the 2026 LBC Site Conditions document says Bullion Creek. The model shows a thin Sentinel Butte cap over clinker and Bullion Creek; confirm with a geologist before naming a formation in copy.
 - Grazing is described as planned ("the land plan calls for…") — update when grazing begins.
