@@ -10,7 +10,7 @@ def cm2stl(v):
 T,_=s.graph['L A N D']; m=s.geometry['L A N D']
 v=cm2stl(trimesh.transform_points(m.vertices,T))
 print(v.min(0),v.max(0))
-X0,X1,Y0,Y1,C=-480,1480,-1080,560,5
+X0,X1,Y0,Y1,C=-1300,2000,-1650,1150,5
 xs=np.arange(X0,X1+.1,C); ys=np.arange(Y0,Y1+.1,C)
 keep=(v[:,0]>X0-100)&(v[:,0]<X1+100)&(v[:,1]>Y0-100)&(v[:,1]<Y1+100)
 idx=np.where(keep)[0]; remap=-np.ones(len(v),int); remap[idx]=np.arange(len(idx))

@@ -32,9 +32,9 @@ export const LAYERS = {
         text: 'Timber canopies over the parking lots carry 792 solar panels, with more on the roof of the maintenance and land stewardship building. Together they are rated at about 352 kilowatts and are expected to make roughly 419,000 kilowatt-hours a year, while shading the cars below.',
         at: 'pv', view: { dist: 560, tilt: 0.75, az: 215 }, show: ['pv'] },
       { id: 'wells', title: '216 wells, 300 feet down',
-        text: 'Under the parking lot, 216 boreholes drop 300 feet into the Sentinel Butte Formation, set at least 20 feet apart. Each holds a loop of plastic pipe sealed in grout. A mix of water and antifreeze runs down one side and back up the other, trading heat with rock that holds a steady temperature all year.',
+        text: 'Under the parking lot, 216 boreholes drop 300 feet through the banded sandstone, siltstone, clay and lignite of the badlands, set at least 20 feet apart. Each holds a loop of plastic pipe sealed in grout. A mix of water and antifreeze runs down one side and back up the other, trading heat with rock that holds a steady temperature all year.',
         at: 'field', cut: { c0: [985, -255], ang: -90, l: 900, w: 600 },
-        view: { dist: 1500, tilt: 0.5, az: 312 }, show: ['depth', 'rock', 'loop'] },
+        view: { dist: 1500, tilt: 0.5, az: 312 }, show: ['depth', 'sb', 'clk', 'bc', 'loop'] },
       { id: 'circuits', title: 'Eight circuits, one vault',
         text: 'The wells are linked in eight circuits. Their pipes run in trenches beneath the pavement to a buried valve vault at the north end of the field, where they join two 6-inch mains: one carrying fluid out to the wells, one bringing it back.',
         at: 'vault', xray: true, view: { dist: 620, tilt: 1.05, az: 215 }, show: ['vault'] },
@@ -156,7 +156,9 @@ export const PLACES = [
 export const CALLOUTS = {
   pv: ['792 panels', '352 kW on timber canopies'],
   depth: ['300 ft', 'bottom of each borehole'],
-  rock: ['Sentinel Butte Formation', 'sandstone, siltstone, clay and lignite'],
+  sb: ['Sentinel Butte Formation', 'gray-brown sand, clay and lignite'],
+  clk: ['Clinker (“scoria”)', 'rock baked red by a burning coal seam'],
+  bc: ['Bullion Creek Formation', 'yellow-brown sand, silt and clay'],
   loop: ['U-shaped loop', 'down one side, up the other'],
   vault: ['Valve vault', '8 circuits join here'],
   mains: ['Two 6-inch mains', 'out to the wells and back'],
@@ -184,4 +186,23 @@ export const CALLOUTS = {
   cores: ['Soil cores', 'a baseline for soil carbon']
 };
 
-export const NOTE = 'Built from the Library’s construction drawings and design documents. Pipes, tanks and equipment are drawn in their planned locations; the drinking-water and fire tanks are placed approximately. The Library has earned SITES and LEED Platinum precertification and is pursuing Living Building Challenge certification.';
+export const NOTE = 'Built from the Library’s construction drawings and design documents, with the building and land from the Library’s campus model. Pipes, tanks and equipment are drawn in their planned locations; the drinking-water and fire tanks are placed approximately. Rock layers follow the badlands around Medora and are drawn to illustrate, not from site borings. The Library has earned SITES and LEED Platinum precertification and is pursuing Living Building Challenge certification.';
+
+// What the moving dots mean (key -> [label, color]); shown in the on-screen legend.
+export const LEGEND = {
+  sun: ['Sunlight', '#FFC94D'],
+  solar: ['Solar electricity', '#FFE7A0'],
+  grid: ['Power from the grid', '#FFFFFF'],
+  loopOut: ['Loop fluid heading down into the rock', '#9AD0F5'],
+  loopBack: ['Loop fluid coming back up', '#FFB27A'],
+  heatingWater: ['Warm water for the floors', '#FF9F5E'],
+  coolingWater: ['Chilled water for the beams', '#7CC0F0'],
+  coolAir: ['Cool air sinking from the beams', '#BFE6F8'],
+  freshAir: ['Fresh outdoor air', '#FFFFFF'],
+  drinking: ['Drinking water', '#3FA2E6'],
+  waste: ['Wastewater', '#9A8263'],
+  treated: ['Cleaned, recycled water', '#A79BEA'],
+  soak: ['Water soaking into the soil', '#C2B8FF'],
+  rain: ['Rain and runoff', '#5AA9D6'],
+  carbon: ['Carbon drawn from the air', '#5C7F8F']
+};

@@ -21,7 +21,7 @@ Static site for GitHub Pages (no build step). three.js r160 is vendored in `asse
 | `index.html`, `assets/app.css` | Page, TRPL brand fonts (served from trlibrary.com) and palette |
 | `assets/app.js` | Scene, layers, animated flows, hotspots, camera, URL/embed handling |
 | `assets/content.js` | **All visitor copy and figures.** Edit text here. |
-| `assets/models/building.glb` | Building massing (roof surface, fascia, walls), ~95 KB |
+| `assets/models/campus.glb` | Building, prairie roof, paths, Boardwalk, overlooks and people from the CampusMap model, transformed into model feet (meshopt, ~3.4 MB) |
 | `assets/data/site.json` | Site features (basins, solar canopies, parking, the Boardwalk, road) in model feet |
 | `assets/data/systems.json` | Wells (19 rows, 216 bores), mains, vault, leach trenches, process tanks, lift station, E148 room + equipment |
 | `assets/data/terrain.bin` | Int16 terrain heights (0.1 ft), 5 ft grid, resampled from the CampusMap GLB |
@@ -36,7 +36,9 @@ Static site for GitHub Pages (no build step). three.js r160 is vendored in `asse
 - M001 Mechanical Site Plan – Geothermal (1" = 50'): 216 boreholes + 2 test bores, circuit layout, 6" HPLS/HPLR mains, vault (registration IoU 0.89). `tools/ex477.py`
 - C510 Overall Wastewater Plan (1" = 100'): leach trenches, process tanks, lift station (IoU 0.85). `tools/c510.py`; trench size/capacity from C511 notes.
 - M301 Enlarged Plans – E148 (1/4" = 1'): equipment positions; M802 schedules for CH-1, HPLP, DWH-1, B-1.
-- Terrain: `Theodore-Roosevelt-Presidential-Library/CampusMap` GLB, registered by roof footprint (IoU 0.92, 1 unit ≈ 33 ft). `tools/regcm.py`, `tools/terrain.py`. The CampusMap plateau is flattened around the building.
+- Building, landscape and terrain: `Theodore-Roosevelt-Presidential-Library/CampusMap` GLB, registered by roof footprint (IoU 0.92, 1 unit ≈ 33 ft). `tools/regcm.py`, `tools/terrain.py` (terrain → `terrain.bin`, 3,300 × 2,800 ft), `tools/export.mjs` (everything except the land mesh → `campus.glb`). The CampusMap model keeps the area around the building flat.
+- Rock layers follow the Medora-area sequence in TRPL's geology explorer (geology.labs.trlibrary.com, `#layers`): gray-brown Sentinel Butte Formation, the red HT Butte clinker band, yellow-brown Bullion Creek Formation below. The contact depths at the Library (clinker drawn about 52–84 ft below the main floor) are illustrative.
+- Moving dots are tied to stops and explained in an on-screen legend (`LEGEND` in `content.js`).
 - `tools/systems.py` assembles `systems.json` and the binaries.
 
 **Approximate locations.** The 15,000-gal and 40,000-gal tanks are placed in the east berm next to the process tanks (no drawing located yet). The mechanical room is placed along the east facade of the east building from M001/M301 and its orientation is approximate. Supply-line, leach-feed and tunnel routes are schematic. Equipment, pipe and well sizes are drawn larger than built so they read at site scale. The page notes this.
@@ -45,5 +47,6 @@ Static site for GitHub Pages (no build step). three.js r160 is vendored in `asse
 - Battery/microgrid shelter-in-place is **not** shown (narrative was a draft and the microgrid was partly value-engineered). Add only once confirmed.
 - Drinking-water and fire/recycled tank positions (placed approximately in the east berm).
 - Final borehole depth (M001 conformed note says 300'; a 300 vs 350 ft study was open in 2022).
+- Formation under the site: the 2022 geotechnical report says weathered Sentinel Butte; the 2026 LBC Site Conditions document says Bullion Creek. The model shows a thin Sentinel Butte cap over clinker and Bullion Creek; confirm with a geologist before naming a formation in copy.
 - Grazing is described as planned ("the land plan calls for…") — update when grazing begins.
 - Certification language: SITES and LEED Platinum *precertification*; Living Building Challenge *pursuing*.

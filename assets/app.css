@@ -108,3 +108,10 @@ button { font: inherit; cursor: pointer; }
 .callout span { display: block; font-size: 11px; color: var(--muted); }
 .cut-tag { font-style: normal; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; margin-left: auto; padding: 1px 6px; border-radius: 10px; background: color-mix(in srgb, var(--layer) 18%, #fff); color: var(--dark-gray); font-weight: 700; }
 @media (max-width: 760px) { .callout b { font-size: 11px; } .callout span { display: none; } }
+/* flow legend */
+.legend { position: absolute; z-index: 5; right: 14px; bottom: 44px; background: rgba(255,255,255,.94); border-radius: 8px; padding: 8px 12px 9px; font-family: var(--ui); font-size: 12px; color: var(--dark-gray); box-shadow: 0 2px 10px rgba(0,0,0,.12); display: grid; gap: 4px; max-width: 260px; }
+.legend[hidden] { display: none; }
+.legend b { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.legend span { display: flex; align-items: center; gap: 8px; }
+.legend i { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1.5px rgba(0,0,0,.25), 0 0 6px var(--c); }
+@media (max-width: 760px) { .legend { right: 8px; bottom: 50px; font-size: 10px; padding: 5px 8px; max-width: 165px; gap: 2px; } .legend b { display: none; } }

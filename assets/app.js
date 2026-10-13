@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { LAYERS, PLACES, NOTE, CALLOUTS } from './content.js';
+import { LAYERS, PLACES, NOTE, CALLOUTS, LEGEND } from './content.js';
 
 // ---------- params / embed ----------
 const qs = new URLSearchParams(location.search);
@@ -139,27 +139,50 @@ P.loopW = (() => { const b = site.boardwalk; let m = b[0]; b.forEach(p => { if (
 const at = a => typeof a === 'string' ? W(...P[a]) : W(...a);
 
 // ---------- strata material (cut faces, block sides) ----------
+// Rock layers drawn after the Medora-area sequence in TRPL's geology explorer (geology.labs.trlibrary.com):
+// gray-brown Sentinel Butte Formation on top, the red HT Butte clinker band, yellow-brown Bullion Creek below.
+// Depths of the contacts at the Library are illustrative, not from site borings.
+const SB_BASE = -52, CLK_BASE = -84;
 const STRATA_GLSL = /* glsl */`
   float h1(float n){ return fract(sin(n*12.9898)*43758.5453); }
   vec3 srgb(vec3 c){ return pow(c, vec3(2.2)); }
+  vec3 rock(vec3 w){
+    float y = w.y + 3.0*sin(w.x*.011 + w.z*.006) + 2.0*sin(w.z*.017 - w.x*.004);
+    vec3 c; float k, f, r;
+    if (y > ${SB_BASE.toFixed(1)}) {
+      k = floor(y/6.5); f = fract(y/6.5); r = h1(k);
+      c = mix(vec3(.67,.62,.56), vec3(.55,.51,.47), r);
+      if (r > .8) c = vec3(.78,.73,.64);
+      if (h1(k+3.7) > .62 && f > .84) c = vec3(.16,.14,.13);
+    } else if (y > ${CLK_BASE.toFixed(1)}) {
+      float n = h1(floor(w.x*.22)+floor(w.z*.22)*31.0+floor(w.y*.35)*7.0);
+      c = mix(vec3(.80,.40,.24), vec3(.62,.25,.15), n);
+      if (y < ${(CLK_BASE + 3).toFixed(1)}) c = vec3(.16,.13,.12);
+    } else {
+      k = floor(y/4.5); f = fract(y/4.5); r = h1(k);
+      c = mix(vec3(.86,.72,.46), vec3(.74,.60,.38), r);
+      if (r > .86) c = vec3(.69,.67,.61);
+      if (h1(k+9.1) > .9 && f > .86) c = vec3(.2,.17,.14);
+    }
+    float g = h1(floor(w.x*.7) + floor(w.z*.7)*57.0 + floor(w.y*.9)*13.0);
+    return c * (.93 + .09*g);
+  }
   vec3 strata(vec3 w, float surf){
     float d = surf - w.y;
-    if (d < 1.4) return srgb(vec3(.24,.19,.13));
-    if (d < 6.0) return srgb(mix(vec3(.47,.36,.25), vec3(.58,.46,.33), smoothstep(1.4,6.0,d)));
-    float y = w.y + 4.0*sin(w.x*.012 + w.z*.005) + 2.5*sin(w.z*.019 - w.x*.003);
-    float k = floor(y / 9.0), f = fract(y / 9.0), r = h1(k);
-    vec3 c;
-    if (r < .30) c = vec3(.86,.78,.60);
-    else if (r < .52) c = vec3(.68,.66,.61);
-    else if (r < .70) c = vec3(.57,.59,.62);
-    else if (r < .88) c = vec3(.78,.68,.52);
-    else c = vec3(.72,.40,.27);
-    if (h1(k + 7.31) > .74 && f > .80) c = vec3(.17,.14,.13);
-    float g = h1(floor(w.x*.7) + floor(w.z*.7)*57.0 + floor(w.y*.7)*13.0);
-    c *= .93 + .09*g;
-    c *= 1.0 - .22*(1.0 - smoothstep(0.0, .05, f));
-    return srgb(c);
+    if (d < 1.2) return srgb(vec3(.26,.20,.14));
+    if (d < 5.0) return srgb(mix(vec3(.45,.36,.27), vec3(.58,.50,.40), smoothstep(1.2,5.0,d)));
+    return srgb(rock(w));
   }`;
+// same rock colors on the CPU for the exposed badland slopes
+function rockColor(x, y, h, out) {
+  const fr = n => { const v = Math.sin(n * 12.9898) * 43758.5453; return v - Math.floor(v); };
+  const wx = x, wz = -y, yy = h + 3 * Math.sin(wx * .011 + wz * .006) + 2 * Math.sin(wz * .017 - wx * .004);
+  let c;
+  if (yy > SB_BASE) { const k = Math.floor(yy / 6.5), f = yy / 6.5 - k, r = fr(k); c = [.67 + (.55 - .67) * r, .62 + (.51 - .62) * r, .56 + (.47 - .56) * r]; if (r > .8) c = [.78, .73, .64]; if (fr(k + 3.7) > .62 && f > .84) c = [.25, .22, .2]; }
+  else if (yy > CLK_BASE) { const n = fr(Math.floor(wx * .05) + Math.floor(wz * .05) * 31); c = [.80 - .18 * n, .40 - .15 * n, .24 - .09 * n]; }
+  else { const k = Math.floor(yy / 4.5), r = fr(k); c = [.86 - .12 * r, .72 - .12 * r, .46 - .08 * r]; if (r > .86) c = [.69, .67, .61]; }
+  return out.setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace);
+}
 function strataMaterial(opts = {}) {
   const m = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, side: THREE.DoubleSide, ...opts });
   m.onBeforeCompile = sh => {
@@ -178,25 +201,22 @@ function strataMaterial(opts = {}) {
 const groundMats = [], clipWithGround = [];
 const terrainPlanes = [new THREE.Plane(), new THREE.Plane(), new THREE.Plane(), new THREE.Plane(), new THREE.Plane()];
 const terrainTop = (() => {
-  const nx = TER.nx, ny = TER.ny, cell = TER.cell;
+  const ST = MOBILE ? 2 : 1, nx = Math.floor((TER.nx - 1) / ST) + 1, ny = Math.floor((TER.ny - 1) / ST) + 1, cell = TER.cell * ST;
+  const TT = new Int16Array(nx * ny); for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) TT[j * nx + i] = TH[j * ST * TER.nx + i * ST];
   const pos = new Float32Array(nx * ny * 3), col = new Float32Array(nx * ny * 3);
   const c = new THREE.Color(), prairie = new THREE.Color('#B5B47F'), prairie2 = new THREE.Color('#A3A56E'), dry = new THREE.Color('#C9BD8E');
   const bands = ['#D8C9A0', '#B9B2A2', '#A7A39A', '#C7AE86', '#B86D4F', '#8E8778'].map(s => new THREE.Color(s));
-  const green = new THREE.Color('#8D9A62'), juniper = new THREE.Color('#5E6B45');
+  const green = new THREE.Color('#8D9A62'), juniper = new THREE.Color('#5E6B45'), rc = new THREE.Color();
   const hash = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-    const k = j * nx + i, x = X0 + i * cell, y = Y0 + j * cell, h = TH[k] * TER.scale;
+    const k = j * nx + i, x = X0 + i * cell, y = Y0 + j * cell, h = TT[k] * TER.scale;
     pos[k * 3] = x; pos[k * 3 + 1] = h; pos[k * 3 + 2] = -y;
-    const hx = TH[j * nx + Math.min(i + 1, nx - 1)] - TH[j * nx + Math.max(i - 1, 0)], hy = TH[Math.min(j + 1, ny - 1) * nx + i] - TH[Math.max(j - 1, 0) * nx + i];
+    const hx = TT[j * nx + Math.min(i + 1, nx - 1)] - TT[j * nx + Math.max(i - 1, 0)], hy = TT[Math.min(j + 1, ny - 1) * nx + i] - TT[Math.max(j - 1, 0) * nx + i];
     const slope = Math.hypot(hx, hy) * TER.scale / (2 * cell);
     const n = hash(i * .37 | 0, j * .37 | 0) * .5 + hash(i, j) * .5;
     c.copy(prairie).lerp(prairie2, n).lerp(dry, Math.max(0, hash(i >> 3, j >> 3) - .6));
-    if (slope > .22) {
-      const bi = Math.floor((h + 3 * Math.sin(x * .01)) / 7) % bands.length;
-      const b = bands[(bi + bands.length) % bands.length];
-      c.lerp(b, Math.min(1, (slope - .22) * 3.5));
-    }
-    if (h < -120 && slope < .25) c.lerp(green, .55);
+    if (slope > .2) c.lerp(rockColor(x, y, h, rc), Math.min(1, (slope - .2) * 3));
+    if (h < -170 && slope < .2) c.lerp(green, .5);
     if (slope > .1 && slope < .5 && hash(i * 3.1, j * 1.7) > .93) c.lerp(juniper, .8);
     col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
   }
@@ -343,7 +363,9 @@ function tube(points, radius, mat, seg) {
   m.userData.curve = curve; return m;
 }
 // many polylines -> one instanced mesh of moving beads
-function flows(group, paths, color, { spacing = 30, speed = 34, size = 2.2, glow = 1, max = 60 } = {}) {
+const flowReg = [];
+function flows(group, paths, key, { spacing = 30, speed = 34, size = 2.2, glow = 1, max = 60, stops = null, ov = true } = {}) {
+  const color = LEGEND[key] ? LEGEND[key][1] : key;
   const P2 = paths.map(pts => { const L = [0]; for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + pts[i].distanceTo(pts[i - 1])); return { pts, L, len: L[L.length - 1] }; }).filter(p => p.len > 1);
   const beads = []; P2.forEach((p, pi) => { const n = Math.max(2, Math.min(max, Math.round(p.len / spacing))); for (let i = 0; i < n; i++) beads.push([pi, i / n]); });
   const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: glow, roughness: .4 });
@@ -360,7 +382,7 @@ function flows(group, paths, color, { spacing = 30, speed = 34, size = 2.2, glow
     inst.instanceMatrix.needsUpdate = true;
   };
   upd(0); animators.push(t => { if (inst.visible && group.visible && !REDUCED) upd(t); });
-  group.add(inst); return inst;
+  group.add(inst); flowReg.push({ inst, key, stops, ov, group }); return inst;
 }
 const smooth = (pts, n = 6) => new THREE.CatmullRomCurve3(pts, false, 'catmullrom', .15).getSpacedPoints(Math.max(2, pts.length * n));
 
@@ -397,10 +419,6 @@ function flatPoly(pts, color, lift = 0.4, opts = {}) {
   groups.site.add(flatPoly(lot, '#BDB7AC'));
   groups.site.add(flatPoly(site.parkingDropoff, '#BDB7AC'));
   site.basins.forEach(b => groups.site.add(flatPoly(b, '#7FAE9B', .45)));
-  const bwMat = std('#9B7651', { r: .8 });
-  const bw = tube(site.boardwalk.map(p => W(p[0], p[1], 2.2)), 4.5, bwMat); bw.scale.y = 1; bw.castShadow = true; groups.site.add(bw);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(site.overlook.r, 4, 8, 48), bwMat);
-  ring.rotation.x = Math.PI / 2; ring.position.copy(W(site.overlook.c[0], site.overlook.c[1], 2.2)); groups.site.add(ring);
   // road
   const rd = site.chateauRoad.filter(p => p[0] < X1 && p[1] < Y1).map(p => W(p[0], p[1], ground(p[0], p[1]) + 0.8));
   const road = tube(rd, 12, std('#A19E96', { r: 1 })); road.scale.y = 1; groups.site.add(road);
@@ -415,19 +433,35 @@ const mats = {
   body: new THREE.MeshStandardMaterial({ color: '#B9A386', roughness: .55, metalness: .05, side: THREE.DoubleSide, clipIntersection: true }),
   floor: new THREE.MeshStandardMaterial({ color: '#D9D4CA', roughness: .9, clipIntersection: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
 };
-bMats.push(mats.roof, mats.fascia, mats.body);
+bMats.push(mats.body);
 const woodColor = new THREE.Color('#C98C4E'), bodyColor = new THREE.Color('#B9A386');
 const roofParts = [];
 {
+  // Building and landscape from the CampusMap model, registered to the drawings' frame (tools/export.mjs)
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
-  const gltf = await loader.loadAsync('assets/models/building.glb');
+  const gltf = await loader.loadAsync('assets/models/campus.glb');
+  const M = (c, o = {}) => { const m = new THREE.MeshStandardMaterial({ color: c, roughness: o.r ?? .85, metalness: o.m ?? 0, side: THREE.DoubleSide, clipIntersection: true, transparent: !!o.op, opacity: o.op ?? 1 }); (o.ground ? clipWithGround : bMats).push(m); return m; };
+  const CM = {
+    plants: M('#7D8F52', { r: 1 }), roofEdge: M('#6E5A45'), walls: mats.body, glass: M('#9FB6C2', { r: .2, m: .4, op: .75 }),
+    wood: M('#9B7651', { r: .8, ground: true }), path: M('#CFC6B3', { r: 1, ground: true }), people: M('#4E5257', { r: .9, ground: true }), rock: M('#A89B8C', { ground: true }), metal: M('#6F747A', { m: .4, r: .5, ground: true })
+  };
+  const pick = n => {
+    if (/roof surface|^roof$|roof_path|plant/.test(n)) return CM.plants;
+    if (/roof wall|north roof overlook/.test(n)) return CM.roofEdge;
+    if (/window|windscreen.*panels|netting/.test(n)) return CM.glass;
+    if (/building|retaining|stairs walls|base/.test(n)) return CM.walls;
+    if (/boardwalk|bench|seat|dip backrest|railings-wood|picnic|windscreen/.test(n)) return CM.wood;
+    if (/path|floor|parking|curve|pebbles|stairs/.test(n)) return CM.path;
+    if (/people/.test(n)) return CM.people;
+    if (/rock/.test(n)) return CM.rock;
+    return null;
+  };
   gltf.scene.traverse(o => {
     if (!o.isMesh) return;
-    const n = (o.name + ' ' + (o.parent?.name || '')).toLowerCase();
-    if (n.includes('roof')) { o.material = mats.roof; roofParts.push(o); }
-    else if (n.includes('fascia')) { o.material = mats.fascia; roofParts.push(o); }
-    else { o.material = mats.body; o.geometry.deleteAttribute('color'); }
-    o.geometry.computeVertexNormals();
+    const n = (o.name + ' ' + (o.parent?.name || '')).toLowerCase().trim();
+    const m = pick(n);
+    if (m) o.material = m; else { o.material = o.material.clone(); o.material.side = THREE.DoubleSide; o.material.clipIntersection = true; bMats.push(o.material); }
+    if (/roof/.test(n)) roofParts.push(o);
     o.castShadow = true; o.receiveShadow = true;
   });
   groups.building.add(gltf.scene);
@@ -491,12 +525,12 @@ const section = new THREE.Group(); interior.add(section);
   bpos.forEach(([x, y, z], i) => { m4.makeTranslation(...W(x, y, z).toArray()); beamsI.setMatrixAt(i, m4); }); section.add(beamsI);
   P.beamC = bpos.length ? bpos[Math.floor(bpos.length * .55)] : [150, 140, 20];
   // cool air drifting down from beams
-  flows(section, bpos.filter((_, i) => i % 3 === 0).map(([x, y, z]) => [W(x, y, z - .6), W(x + 2, y, Math.max(3, z - 12))]), '#7CC6EA', { spacing: 4, speed: 4, size: .55, glow: .8 });
+  flows(section, bpos.filter((_, i) => i % 3 === 0).map(([x, y, z]) => [W(x, y, z - .6), W(x + 2, y, Math.max(3, z - 12))]), 'coolAir', { stops: ['radiant'], ov: false, spacing: 4, speed: 4, size: .55, glow: .8 });
   // fresh-air duct along the gallery
   const duct = [W(150, 40, 0), W(150, 120, 0), W(150, 200, 0)];
   duct.forEach(p => { p.y = Math.max(14, roofAt(p.x, -p.z) - 4.2); });
   const dm = std('#D7DBDE', { r: .4, m: .5 }); dm.clipIntersection = true; bMats.push(dm); section.add(tube(duct, 1.6, dm, 40));
-  flows(section, [duct], '#FFFFFF', { spacing: 12, speed: 18, size: .8, glow: .5 });
+  flows(section, [duct], 'freshAir', { stops: ['radiant'], ov: false, spacing: 12, speed: 18, size: .8, glow: .5 });
   P.duct = [150, 112, duct[1].y + 1];
   // glulam beams (carbon & envelope)
   const beamMat = std('#D08A45', { e: .2, r: .6 }); beamMat.clipIntersection = true; bMats.push(beamMat);
@@ -535,7 +569,7 @@ const specimens = {};
   const xps = new THREE.Mesh(new THREE.BoxGeometry(S, .6, S), std('#9CC3D9', { r: .9 })); xps.position.copy(W(base[0], base[1], base[2] - .5)); g.add(xps);
   const pts = []; for (let k = 0; k < 9; k++) { const y = base[1] - S / 2 + 1.2 + k * (S - 2.4) / 8; const a = W(base[0] - S / 2 + 1, y, base[2] + .7), b = W(base[0] + S / 2 - 1, y, base[2] + .7); if (k % 2) pts.push(b, a); else pts.push(a, b); }
   const tg = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, 'catmullrom', .05), 200, .32, 6), std('#F07F3C', { e: .6 })); g.add(tg);
-  flows(g, [pts], '#FFD2B0', { spacing: 3, speed: 5, size: .38 });
+  flows(g, [pts], 'heatingWater', { stops: ['radiant'], ov: false, spacing: 3, speed: 5, size: .38 });
   g.visible = false; interior.add(g); specimens.slab = { g, lab: { slab: [base[0] + S / 2, base[1] - S / 2, base[2] + .8] } };
 }
 
@@ -577,9 +611,9 @@ const COOL = '#4E9BD6', WARM = '#F07F3C';
   // sunlight onto panels
   const sunPaths = [];
   site.pv.slice().sort((a, b) => polyArea(b) - polyArea(a)).slice(0, 5).forEach(poly => { const c = centroid(poly); for (let j = 0; j < 3; j++) { const dx = (j - 1) * 16; sunPaths.push([W(c[0] - 240 + dx, c[1] + 140, 400), W(c[0] + dx * .3, c[1], 17)]); } });
-  flows(E, sunPaths, '#FFC94D', { spacing: 70, speed: 120, size: 2.2, glow: 1.4 });
+  flows(E, sunPaths, 'sun', { stops: ['solar', 'goal'], ov: true, spacing: 70, speed: 120, size: 2.2, glow: 1.4 });
   // power to the building
-  flows(E, [smooth([W(pvC[0], pvC[1], 12), W(pvC[0] - 140, pvC[1] + 120, 3), W(560, 60, 3), W(430, 70, 4)])], '#FFC94D', { spacing: 22, speed: 50 });
+  flows(E, [smooth([W(pvC[0], pvC[1], 12), W(pvC[0] - 140, pvC[1] + 120, 3), W(560, 60, 3), W(430, 70, 4)])], 'solar', { stops: ['solar', 'goal'], ov: true, spacing: 22, speed: 50 });
 
   // ---- geothermal wells (M001: 216 boreholes, 300 ft) ----
   const DEPTH = sys.wellDepth;
@@ -603,13 +637,14 @@ const COOL = '#4E9BD6', WARM = '#F07F3C';
   const { u: pu, v: pv, c0: pc0 } = cutFrame(pitStop.cut.c, pitStop.cut.ang, pitStop.cut.l, pitStop.cut.w, pitStop.cut.c0);
   const inPit = ([x, y]) => { const s = (x - pc0[0]) * pu[0] + (y - pc0[1]) * pu[1], t = (x - pc0[0]) * pv[0] + (y - pc0[1]) * pv[1]; return s > 0 && s < pitStop.cut.l && t > 0 && t < pitStop.cut.w; };
   const pitWells = allWells.filter(inPit);
-  flows(E, pitWells.map(([x, y]) => [W(x - 1.1, y, -5), W(x - 1.1, y, -5 - DEPTH)]), '#9AD0F5', { spacing: 26, speed: 22, size: 1.5 });
-  flows(E, pitWells.map(([x, y]) => [W(x + 1.1, y, -5 - DEPTH), W(x + 1.1, y, -5)]), '#FFB27A', { spacing: 26, speed: 22, size: 1.5 });
+  flows(E, pitWells.map(([x, y]) => [W(x - 1.1, y, -5), W(x - 1.1, y, -5 - DEPTH)]), 'loopOut', { stops: ['wells'], ov: false, spacing: 26, speed: 22, size: 1.5 });
+  flows(E, pitWells.map(([x, y]) => [W(x + 1.1, y, -5 - DEPTH), W(x + 1.1, y, -5)]), 'loopBack', { stops: ['wells'], ov: false, spacing: 26, speed: 22, size: 1.5 });
   // depth ruler on the pit's far corner
   const rc = [pc0[0] + pu[0] * 3 + pv[0] * 3, pc0[1] + pu[1] * 3 + pv[1] * 3];
   [100, 200].forEach(d => { const el = document.createElement('div'); el.className = 'ruler'; el.textContent = `${d} ft`; const o = new CSS2DObject(el); o.position.copy(W(rc[0], rc[1], -d)); E.add(o); (callouts.depth ||= []).push(o); o.visible = false; el.style.display = 'none'; });
   callout(E, 'depth', W(rc[0], rc[1], -DEPTH - 5));
-  callout(E, 'rock', W(pc0[0] + pu[0] * 260 - pv[0] * 2, pc0[1] + pu[1] * 260 - pv[1] * 2, -170));
+  const fp = d => [pc0[0] + pu[0] * d + pv[0], pc0[1] + pu[1] * d + pv[1]];
+  callout(E, 'sb', W(...fp(330), -28)); callout(E, 'clk', W(...fp(400), (SB_BASE + CLK_BASE) / 2)); callout(E, 'bc', W(...fp(330), -190));
   if (pitWells.length) { const w0 = pitWells.reduce((a, b) => Math.hypot(b[0] - rc[0], b[1] - rc[1]) < Math.hypot(a[0] - rc[0], a[1] - rc[1]) ? b : a); callout(E, 'loop', W(w0[0] + 1, w0[1], -60)); }
 
   // ---- circuits: rows of wells -> vault (M001) ----
@@ -626,7 +661,7 @@ const COOL = '#4E9BD6', WARM = '#F07F3C';
     circuitPaths.push(curvePts.map(p => p.clone().add(new THREE.Vector3(0, .9, 0))));
   });
   E.add(new THREE.Mesh(mergeGeometries(rowGeos), pipeMat));
-  flows(E, circuitPaths, '#FFB27A', { spacing: 40, speed: 30, size: 1.6 });
+  flows(E, circuitPaths, 'loopBack', { stops: ['circuits'], ov: false, spacing: 40, speed: 30, size: 1.6 });
   const vbox = new THREE.Mesh(new THREE.BoxGeometry(16, 9, 12), std('#8F969C', { r: .6 })); vbox.position.copy(W(vault[0], vault[1], -6)); vbox.rotation.y = 108 * D2R; E.add(vbox);
   callout(E, 'vault', W(vault[0], vault[1], 4));
 
@@ -640,25 +675,25 @@ const COOL = '#4E9BD6', WARM = '#F07F3C';
   const rOut = [W(entry[0] + 3, entry[1] - 2, 2), W(entry[0] + 3, entry[1] - 2, -6), ...ret];
   E.add(tube(sIn, 1.3, std(WARM, { e: .3 }), 300));
   E.add(tube(rOut, 1.3, std(COOL, { e: .3 }), 300));
-  flows(E, [sIn], '#FFB27A', { spacing: 18, speed: 40, size: 1.7 });
-  flows(E, [rOut], '#9AD0F5', { spacing: 18, speed: 40, size: 1.7 });
+  flows(E, [sIn], 'loopBack', { stops: ['circuits', 'header', 'plant'], ov: false, spacing: 18, speed: 40, size: 1.7 });
+  flows(E, [rOut], 'loopOut', { stops: ['circuits', 'header', 'plant'], ov: false, spacing: 18, speed: 40, size: 1.7 });
   callout(E, 'mains', W(...P.headerMid.slice(0, 2), 2));
   // plant -> manifold -> heat pumps
   const hp = MR.equipment.filter(e => e.kind === 'hp' && e.tag.startsWith('WWHP')).map(e => W(e.at[0], e.at[1], 3));
-  flows(E, [[W(entry[0], entry[1], 3), ...hp, eqPos['CH-1'].clone().setY(3)]], '#FFB27A', { spacing: 6, speed: 12, size: .9 });
+  flows(E, [[W(entry[0], entry[1], 3), ...hp, eqPos['CH-1'].clone().setY(3)]], 'loopBack', { stops: ['plant'], ov: false, spacing: 6, speed: 12, size: .9 });
   // tunnel to west building + radiant loop
   const tun = tube(tunnelPts, 4.5, std('#BDB6A8', { op: .45, dw: false, side: THREE.DoubleSide }), 40); E.add(tun);
-  flows(E, [tunnelPts.map(p => p.clone().add(new THREE.Vector3(0, -1, 1.5)))], '#FFB27A', { spacing: 10, speed: 22, size: 1.1 });
-  flows(E, [tunnelPts.slice().reverse().map(p => p.clone().add(new THREE.Vector3(0, -1, -1.5)))], '#9AD0F5', { spacing: 10, speed: 22, size: 1.1 });
+  flows(E, [tunnelPts.map(p => p.clone().add(new THREE.Vector3(0, -1, 1.5)))], 'heatingWater', { stops: ['radiant', 'plant'], ov: false, spacing: 10, speed: 22, size: 1.1 });
+  flows(E, [tunnelPts.slice().reverse().map(p => p.clone().add(new THREE.Vector3(0, -1, -1.5)))], 'coolingWater', { stops: ['radiant', 'plant'], ov: false, spacing: 10, speed: 22, size: 1.1 });
   // grid line from the road
   const gp = site.chateauRoad.filter(p => p[0] < X1 - 20 && p[1] < Y1 - 20).slice(0, 3).map(p => W(p[0], p[1], ground(p[0], p[1]) + 32));
   gp.push(W(lotC[0] + 60, lotC[1] + 40, 26), W(470, 60, 22));
   E.add(tube(gp, 1, std('#7B7F86')));
   gp.slice(0, 4).forEach(p => { const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.6, 34), std('#7a5d3e')); pole.position.set(p.x, p.y - 16, p.z); E.add(pole); });
-  flows(E, [gp], '#FFFFFF', { spacing: 50, speed: 60, size: 2.2, glow: .6 });
+  flows(E, [gp], 'grid', { stops: ['goal'], ov: true, spacing: 50, speed: 60, size: 2.2, glow: .6 });
 }
 // equipment callouts (shared by energy & water)
-['WWHP-2', 'CH-1', 'HPLP-1', 'DWH-1', 'B-1', 'AHU-1'].forEach(t => eqPos[t] && callout(E, t, eqPos[t]));
+['WWHP-2', 'CH-1', 'HPLP-1', 'DWH-1', 'B-1', 'AHU-1'].forEach(t => eqPos[t] && callout(E, t, eqPos[t], { left: ['HPLP-1', 'B-1', 'AHU-1'].includes(t) }));
 callout(E, 'beam', W(...P.beamC.slice(0, 2), P.beamC[2] - 1));
 callout(E, 'air', W(...P.duct));
 
@@ -688,19 +723,19 @@ const PURPLE = '#7C6FD0', BLUE = '#3B9BD6', BROWN = '#9A8A6A', TEAL = '#3FB3A6';
   const rd = site.chateauRoad.filter(p => p[0] < X1 - 20 && p[1] < Y1 - 20).slice(0, 3).reverse();
   const supply = smooth([...rd.map(p => W(p[0], p[1], -7)), W(900, 60, -7), W(700, 150, -7), W(potC[0], potC[1], -7)], 5);
   H2O.add(tube(supply, 1.2, std(BLUE, { e: .25 }), 200));
-  flows(H2O, [supply], '#8FD0F7', { spacing: 30, speed: 30, size: 1.8 });
-  flows(H2O, [smooth([W(potC[0], potC[1], -6), W(500, 140, -4), W(430, 120, 2), W(320, 120, 3), W(200, 110, 3)], 4)], '#8FD0F7', { spacing: 14, speed: 20, size: 1.5 });
+  flows(H2O, [supply], 'drinking', { stops: ['pipeline', 'tanks'], ov: false, spacing: 30, speed: 30, size: 1.8 });
+  flows(H2O, [smooth([W(potC[0], potC[1], -6), W(500, 140, -4), W(430, 120, 2), W(320, 120, 3), W(200, 110, 3)], 4)], 'drinking', { stops: ['pipeline', 'reuse'], ov: false, spacing: 14, speed: 20, size: 1.5 });
   // wastewater: building -> lift station -> process tanks -> MBR skid -> holding/non-potable tank
-  flows(H2O, [smooth([W(150, 120, 1), W(300, 130, -3), W(420, 150, -6), W(sys.liftStation[0], sys.liftStation[1], -8)], 4)], BROWN, { spacing: 14, speed: 14, size: 1.6 });
-  flows(H2O, [smooth([W(sys.liftStation[0], sys.liftStation[1], -6), W(pt[0].c[0], pt[0].c[1], -8), W(pt[1].c[0], pt[1].c[1], -8), W(pt[2].c[0], pt[2].c[1], -8)], 3)], BROWN, { spacing: 10, speed: 12, size: 1.6 });
-  flows(H2O, [smooth([W(pt[2].c[0], pt[2].c[1], -6), W(470, 120, -3), mbr], 3)], TEAL, { spacing: 8, speed: 12, size: 1.3 });
-  flows(H2O, [smooth([mbr, W(470, 110, -3), W(npC[0], npC[1], -8)], 3)], '#A79BEA', { spacing: 8, speed: 12, size: 1.3 });
+  flows(H2O, [smooth([W(150, 120, 1), W(300, 130, -3), W(420, 150, -6), W(sys.liftStation[0], sys.liftStation[1], -8)], 4)], 'waste', { stops: ['tanks', 'treat', 'reuse'], ov: false, spacing: 14, speed: 14, size: 1.6 });
+  flows(H2O, [smooth([W(sys.liftStation[0], sys.liftStation[1], -6), W(pt[0].c[0], pt[0].c[1], -8), W(pt[1].c[0], pt[1].c[1], -8), W(pt[2].c[0], pt[2].c[1], -8)], 3)], 'waste', { stops: ['tanks', 'treat'], ov: false, spacing: 10, speed: 12, size: 1.6 });
+  flows(H2O, [smooth([W(pt[2].c[0], pt[2].c[1], -6), W(470, 120, -3), mbr], 3)], 'waste', { stops: ['treat'], ov: false, spacing: 8, speed: 12, size: 1.3 });
+  flows(H2O, [smooth([mbr, W(470, 110, -3), W(npC[0], npC[1], -8)], 3)], 'treated', { stops: ['treat', 'tanks'], ov: false, spacing: 8, speed: 12, size: 1.3 });
   // recycled water back in for flushing
-  flows(H2O, [smooth([W(npC[0], npC[1], -6), W(480, 100, -2), W(330, 80, 3), W(180, 60, 3)], 4)], '#A79BEA', { spacing: 14, speed: 18, size: 1.5 });
+  flows(H2O, [smooth([W(npC[0], npC[1], -6), W(480, 100, -2), W(330, 80, 3), W(180, 60, 3)], 4)], 'treated', { stops: ['reuse'], ov: false, spacing: 14, speed: 18, size: 1.5 });
   // to the leach fields
   const toLeach = smooth([W(npC[0], npC[1], -8), W(600, 40, -7), W(560, -150, -7), W(560, -300, -6), W(600, -400, -4)], 5);
   H2O.add(tube(toLeach, .9, std(PURPLE, { e: .25 }), 160));
-  flows(H2O, [toLeach], '#A79BEA', { spacing: 26, speed: 26, size: 1.6 });
+  flows(H2O, [toLeach], 'treated', { stops: ['leach', 'tanks'], ov: false, spacing: 26, speed: 26, size: 1.6 });
   // leach trenches (C510/C511): drain rock + perforated lateral
   const rock = std('#C9C3B6', { r: 1 }), lat = std(PURPLE, { e: .4 });
   const rockI = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 2.3, 2), rock, sys.trenches.length);
@@ -715,8 +750,8 @@ const PURPLE = '#7C6FD0', BLUE = '#3B9BD6', BROWN = '#9A8A6A', TEAL = '#3FB3A6';
   const { u: lu, v: lv, c0: lc0 } = cutFrame(lstop.cut.c, lstop.cut.ang, lstop.cut.l, lstop.cut.w);
   const seeps = [];
   sys.trenches.forEach(([a, b]) => { for (let f = .1; f < 1; f += .12) { const x = a[0] + (b[0] - a[0]) * f, y = a[1] + (b[1] - a[1]) * f; const s = (x - lc0[0]) * lu[0] + (y - lc0[1]) * lu[1], t = (x - lc0[0]) * lv[0] + (y - lc0[1]) * lv[1]; if (s > 0 && s < lstop.cut.l && t > 0 && t < lstop.cut.w) seeps.push([W(x, y, -2.4), W(x + .3, y, -4)]); } });
-  flows(H2O, seeps, '#A79BEA', { spacing: 1, speed: .8, size: .35, glow: .8 });
-  flows(H2O, sys.trenches.map(([a, b]) => [W(a[0], a[1], -2.1), W(b[0], b[1], -2.1)]), '#C2B8FF', { spacing: 25, speed: 10, size: .6 });
+  flows(H2O, seeps, 'soak', { stops: ['leach'], ov: false, spacing: 1, speed: .8, size: .35, glow: .8 });
+  flows(H2O, sys.trenches.map(([a, b]) => [W(a[0], a[1], -2.1), W(b[0], b[1], -2.1)]), 'treated', { stops: ['leach'], ov: false, spacing: 25, speed: 10, size: .6 });
   const tr0 = sys.trenches.reduce((best, tr) => { const c = [(tr[0][0] + tr[1][0]) / 2, (tr[0][1] + tr[1][1]) / 2]; const d = Math.hypot(c[0] - lstop.cut.c[0], c[1] - lstop.cut.c[1]); return d < best.d ? { d, c } : best; }, { d: 1e9 }).c;
   callout(H2O, 'trench', W(tr0[0], tr0[1], -2));
   // rain + runoff to basins
@@ -732,7 +767,7 @@ const PURPLE = '#7C6FD0', BLUE = '#3B9BD6', BROWN = '#9A8A6A', TEAL = '#3FB3A6';
   drawRain(0);
   animators.push(t => { const dt = Math.min(.05, t - lastT); lastT = t; if (rain.visible && H2O.visible && !REDUCED) drawRain(dt); });
   const runoff = site.basins.map(b => { const c = centroid(b); const s = [Math.min(Math.max(c[0], 20), 560), Math.min(Math.max(c[1], -30), 210)]; return smooth([W(s[0], s[1], 30), W((s[0] + c[0]) / 2, (s[1] + c[1]) / 2, 4), W(c[0], c[1], 1.5)], 4); });
-  flows(H2O, runoff, '#5AA9D6', { spacing: 26, speed: 24, size: 2 });
+  flows(H2O, runoff, 'rain', { stops: ['roof', 'basins', 'sprinklers', 'loop'], ov: true, spacing: 26, speed: 24, size: 2 });
   const bmat = new THREE.MeshBasicMaterial({ color: '#4FC0E8', transparent: true, opacity: .45, depthWrite: false }); clipWithGround.push(bmat);
   site.basins.forEach(b => { const g = new THREE.ShapeGeometry(shapeFrom(b)); g.rotateX(-Math.PI / 2); const m = new THREE.Mesh(g, bmat); m.position.y = .7; H2O.add(m); });
   animators.push(t => { bmat.opacity = REDUCED ? .45 : .35 + .15 * Math.sin(t * 1.2); });
@@ -761,7 +796,7 @@ const C = groups.carbon;
   const tuft = new THREE.InstancedMesh(new THREE.ConeGeometry(.6, 2.8, 5), std('#8F9B55'), wallPts.length); wallPts.forEach(([x, y], i) => { m4.makeTranslation(x, hAt(x, y) + 1.3, -y); tuft.setMatrixAt(i, m4); }); C.add(tuft);
   // carbon drifting into the prairie
   const dots = []; for (let i = 0; i < 26; i++) { const x = c0[0] + u[0] * rnd(0, L) + v[0] * rnd(0, Wd), y = c0[1] + u[1] * rnd(0, L) + v[1] * rnd(0, Wd); dots.push([W(x + 30, y + 30, 80), W(x, y, 1), W(x + .3, y, -8)]); }
-  flows(C, dots.slice(0, 14), '#5C7F8F', { spacing: 22, speed: 6, size: .4, glow: .5 });
+  flows(C, dots.slice(0, 14), 'carbon', { stops: ['prairie', 'soil'], ov: false, spacing: 22, speed: 6, size: .4, glow: .5 });
   callout(C, 'roots', W(c0[0] + v[0] * Wd + u[0] * L * .5, c0[1] + v[1] * Wd + u[1] * L * .5, -6));
   // soil cores standing on the pit floor
   for (let i = 0; i < 4; i++) { const s = L * (.25 + i * .17), t = Wd * .55; const x = c0[0] + u[0] * s + v[0] * t, y = c0[1] + u[1] * s + v[1] * t; const core = new THREE.Mesh(new THREE.CylinderGeometry(.5, .5, 3.5, 12), std('#5A4128', { e: .1 })); core.position.copy(W(x, y, -14)); const tubeC = new THREE.Mesh(new THREE.CylinderGeometry(.62, .62, 3.6, 12, 1, true), std('#E3E7EA', { op: .35, dw: false, side: THREE.DoubleSide })); tubeC.position.copy(core.position); C.add(core, tubeC); if (!i) callout(C, 'cores', W(x, y, -11.5)); }
@@ -813,6 +848,14 @@ function showCallouts(list) {
   const want = new Set(list || []);
   Object.entries(callouts).forEach(([id, arr]) => arr.forEach(o => { const vis = want.has(id) && o.parent && o.parent.visible !== false && isShown(o); o.visible = vis; o.element.style.display = vis ? '' : 'none'; }));
 }
+const legendEl = document.createElement('div'); legendEl.className = 'legend'; viewer.appendChild(legendEl);
+function updateFlows(id) {
+  const keys = [];
+  flowReg.forEach(f => { f.inst.visible = id ? (!f.stops || f.stops.includes(id)) : f.ov; });
+  flowReg.forEach(f => { if (f.inst.visible && isShown(f.inst) && !keys.includes(f.key)) keys.push(f.key); });
+  legendEl.innerHTML = keys.length ? `<b>Moving dots</b>${keys.filter(k => LEGEND[k]).map(k => `<span><i style="--c:${LEGEND[k][1]}"></i>${LEGEND[k][0]}</span>`).join('')}` : '';
+  legendEl.hidden = !keys.length;
+}
 function isShown(o) { let p = o.parent; while (p) { if (p.visible === false) return false; p = p.parent; } return true; }
 
 function setLayer(k, opts = {}) {
@@ -822,6 +865,7 @@ function setLayer(k, opts = {}) {
   document.documentElement.style.setProperty('--layer', LAYERS[k].color || '#1B4633');
   setRoof(false); setWood(k === 'carbon'); setCuts(null); setXray(false); showCallouts([]);
   if (groups.water.userData.rain) groups.water.userData.rain.visible = true;
+  updateFlows(null);
   renderPanel();
   if (!opts.noFly) flyTo(HOME.target, HOME.pos);
   if (!EMBED && !opts.noHash) history.replaceState(null, '', `#${k}`);
@@ -833,8 +877,9 @@ function selectStop(i) {
   setCuts(s);
   setXray(!!s.xray);
   setWood(layer === 'carbon');
-  if (groups.water.userData.rain) groups.water.userData.rain.visible = !['tanks', 'treat', 'leach'].includes(s.id);
+  if (groups.water.userData.rain) groups.water.userData.rain.visible = ['roof', 'basins', 'sprinklers', 'loop'].includes(s.id);
   showCallouts(s.show);
+  updateFlows(s.id);
   hotspotEls[layer].forEach((el, j) => el.classList.toggle('active', j === i));
   const v = viewFor(s); flyTo(v.t, v.pos);
   renderPanel();
@@ -852,7 +897,7 @@ function renderPanel() {
     body = `<ol class="stops">${L.stops.map((s, i) => `<li class="${i === stop ? 'open' : ''}"><button data-stop="${i}" aria-expanded="${i === stop}"><i>${i + 1}</i>${s.title}${s.cut || s.bcut ? '<em class="cut-tag">cutaway</em>' : ''}</button>${i === stop ? `<div class="detail"><p>${s.text}</p><div class="nav">${i > 0 ? `<button data-stop="${i - 1}">‹ Back</button>` : '<span></span>'}${i < L.stops.length - 1 ? `<button data-stop="${i + 1}" class="next">Next ›</button>` : `<button data-go="overview" class="next">All systems</button>`}</div></div>` : ''}</li>`).join('')}</ol>`;
   }
   panel.querySelector('.panel-body').innerHTML = `<div class="eyebrow">Theodore Roosevelt Presidential Library</div><h2>${L.title}</h2><p class="intro">${L.intro}</p>${stats}${body}<p class="note">${NOTE}</p>`;
-  panel.querySelectorAll('[data-stop]').forEach(b => b.addEventListener('click', () => { const i = +b.dataset.stop; if (i === stop && b.closest('li') && !b.classList.contains('next')) { stop = -1; setCuts(null); setXray(false); showCallouts([]); renderPanel(); hotspotEls[layer].forEach(el => el.classList.remove('active')); return; } selectStop(i); }));
+  panel.querySelectorAll('[data-stop]').forEach(b => b.addEventListener('click', () => { const i = +b.dataset.stop; if (i === stop && b.closest('li') && !b.classList.contains('next')) { stop = -1; setCuts(null); setXray(false); showCallouts([]); updateFlows(null); renderPanel(); hotspotEls[layer].forEach(el => el.classList.remove('active')); return; } selectStop(i); }));
   panel.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => setLayer(b.dataset.go)));
   const open = panel.querySelector('li.open'); if (open) open.scrollIntoView({ block: 'nearest', behavior: REDUCED ? 'auto' : 'smooth' });
 }

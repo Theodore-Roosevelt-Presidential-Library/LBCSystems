@@ -3,7 +3,7 @@ Sources (conformed set, 20299 TRPL): M001 geothermal site plan (wells, header, v
 C510 overall wastewater plan (leach trenches, process tanks, lift station),
 M301 enlarged MEP E148 plan (equipment layout), M802 schedules, CampusMap GLB terrain."""
 import json, numpy as np
-W='/home/claude/lbc/'; X='/tmp/claude-0/x/'; OUT='/home/claude/lbc/repo/assets/data/'
+W='/home/claude/lbc/'; X='/tmp/claude-0/x/'; OUT='/home/claude/lbcsystems/assets/data/'
 rows=json.load(open(X+'rows.json'))['rows']
 header=json.load(open(X+'header_stl.json'))
 trenches=json.load(open(X+'trenches.json'))
@@ -31,7 +31,7 @@ H=np.load(W+'cm/H.npy'); H=np.clip(H,-400,300)
 (np.round(H*10).astype('<i2')).tofile(OUT+'terrain.bin')
 top=np.load(W+'top.npy'); tb=np.where(top>-90,np.round(top*10),-32768).astype('<i2'); tb.tofile(OUT+'roof.bin')
 d=dict(
-  terrain=dict(x0=-480,y0=-1080,cell=5,nx=int(H.shape[1]),ny=int(H.shape[0]),scale=0.1),
+  terrain=dict(x0=-1300,y0=-1650,cell=5,nx=int(H.shape[1]),ny=int(H.shape[0]),scale=0.1),
   roof=dict(x0=-10,y0=-80,cell=2,nx=int(top.shape[1]),ny=int(top.shape[0]),scale=0.1),
   wellRows=[[ [round(p[0],1),round(p[1],1)] for p in r] for r in rows],
   wellDepth=300, header=header, vault=vault,
