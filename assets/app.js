@@ -50,7 +50,7 @@ scene.background = SKY;
 scene.fog = new THREE.Fog(SKY, 4200, 9000);
 
 const camera = new THREE.PerspectiveCamera(35, 1, 2, 30000);
-const controls = new OrbitControls(camera, labelRenderer.domElement);
+const controls = new OrbitControls(camera, renderer.domElement); // the label layer passes pointer events through to the canvas
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI * 0.49;
@@ -1213,7 +1213,7 @@ const hotspotEls = { energy: [], water: [], carbon: [] };
 
 // ---------- state ----------
 let detailTab = 'simple';
-let layer = 'overview', stop = -1, xray = false, roofOff = false;
+let layer = 'overview', stop = -1, xray = false, roofOff = false, userLook = false;
 const HOME = { target: W(420, -110, -20), pos: W(1080, -1010, 520) };
 const fly = { active: false };
 function flyTo(target, pos, dur = 1.4) {
@@ -1255,12 +1255,12 @@ function showCallouts(list) {
 const camHint = viewer.querySelector('.hint') || document.querySelector('.hint');
 // free look only outside the guided tour; during a step the camera holds the framed view
 function syncCam() {
-  const free = stop < 0;
+  const free = stop < 0 || userLook;
   controls.enabled = free; viewer.classList.toggle('locked', !free); viewer.classList.toggle('look', roofOff || xray);
   if (!camHint) return;
   camHint.textContent = free
     ? (TOUCH ? 'Drag to turn · Pinch to zoom · Two fingers to pan' : 'Drag to turn · Scroll to zoom · Right-drag to pan') + (layer === 'overview' ? '' : ' · Tap a number')
-    : 'View is set for this step · Tap the step again to look around';
+    : 'View is set for this step · Use See through ground or Lift the roof to look around';
 }
 const legendEl = document.createElement('div'); legendEl.className = 'legend'; viewer.appendChild(legendEl);
 function updateFlows(id) {
@@ -1274,7 +1274,7 @@ function updateFlows(id) {
 function isShown(o) { let p = o.parent; while (p) { if (p.visible === false) return false; p = p.parent; } return true; }
 
 function setLayer(k, opts = {}) {
-  layer = k; stop = -1;
+  layer = k; stop = -1; userLook = false;
   ['overview', 'energy', 'water', 'carbon'].forEach(n => { groups[n].visible = n === k; groups[n].traverse(o => { if (o.isCSS2DObject && !Object.values(callouts).some(a => a.includes(o))) { o.visible = n === k; o.element.style.display = n === k ? '' : 'none'; } }); });
   [...tabs.querySelectorAll('button')].forEach(b => b.setAttribute('aria-selected', b.dataset.layer === k));
   document.documentElement.style.setProperty('--layer', LAYERS[k].color || '#1B4633');
@@ -1287,7 +1287,7 @@ function setLayer(k, opts = {}) {
 }
 function selectStop(i) {
   const L = LAYERS[layer]; if (!L.stops[i]) return;
-  stop = i; const s = L.stops[i];
+  stop = i; userLook = false; const s = L.stops[i];
   setRoof(s.roof === false);
   setCuts(s);
   setXray(!!s.xray);
@@ -1325,8 +1325,8 @@ function renderPanel() {
 tabs.innerHTML = ['overview', 'energy', 'water', 'carbon'].map(k => `<button role="tab" data-layer="${k}" style="--c:${LAYERS[k].color || '#1B4633'}">${LAYERS[k].label}</button>`).join('');
 tabs.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setLayer(b.dataset.layer)));
 if (LOCK_LAYER) tabs.hidden = true;
-btnUnder.addEventListener('click', () => setXray(!xray));
-btnRoof.addEventListener('click', () => { setRoof(!roofOff); interior.visible = roofOff || BCUT.on; mech.visible = roofOff || (BCUT.on && BCUT.ang !== 0); if (roofOff && stop < 0) flyTo(W(235, 85, 0), W(330, -160, 330)); });
+btnUnder.addEventListener('click', () => { userLook = true; setXray(!xray); });
+btnRoof.addEventListener('click', () => { userLook = true; setRoof(!roofOff); interior.visible = roofOff || BCUT.on; mech.visible = roofOff || (BCUT.on && BCUT.ang !== 0); if (roofOff && stop < 0) flyTo(W(235, 85, 0), W(330, -160, 330)); });
 btnReset.addEventListener('click', () => { if (stop >= 0) { const v = viewFor(LAYERS[layer].stops[stop]); flyTo(v.t, v.pos); } else flyTo(HOME.target, HOME.pos); });
 panel.querySelector('.panel-toggle')?.addEventListener('click', () => panel.classList.toggle('collapsed'));
 
