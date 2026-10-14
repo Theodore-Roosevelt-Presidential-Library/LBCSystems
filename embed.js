@@ -21,8 +21,9 @@
     if (d.lock === 'on') q.push('lock=1');
     if (d.panel === 'off') q.push('panel=0');
     var wrap = document.createElement('div');
-    wrap.style.cssText = 'position:relative;width:100%;border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.06),0 6px 20px rgba(22,55,40,.08);background:#EEF0EA';
+    wrap.style.cssText = 'position:relative;width:100%;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.06),0 6px 20px rgba(22,55,40,.08);background:#EEF0EA';
     var f = document.createElement('iframe');
+    f.setAttribute('allowfullscreen', '');
     f.src = BASE + '?' + q.join('&');
     f.title = 'How the Library Works: interactive 3D model of the Library’s ' + (d.layer && d.layer !== 'overview' ? d.layer + ' system' : 'energy, water and carbon systems');
     f.loading = 'lazy';
@@ -35,10 +36,6 @@
       f.style.height = h + 'px';
     };
     wrap.appendChild(f); target.appendChild(wrap);
-    var link = document.createElement('p');
-    link.style.cssText = 'margin:8px 0 0;font:14px/1.4 Frutiger,system-ui,sans-serif';
-    link.innerHTML = '<a href="' + BASE + (d.layer ? '#' + d.layer + (d.stop ? '/' + d.stop : '') : '') + '" target="_blank" rel="noopener">Open the full-screen model ↗</a>';
-    target.appendChild(link);
     size(); window.addEventListener('resize', size);
   });
 })();

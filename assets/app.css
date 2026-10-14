@@ -91,7 +91,7 @@ button { font: inherit; cursor: pointer; }
   .panel-toggle span { display: block; width: 40px; height: 4px; margin: 6px auto; background: var(--sand); border-radius: 4px; }
   .panel-body { padding: 18px 16px 4px; }
   .panel h2 { font-size: 40px; }
-  .tabs { left: 50%; transform: translateX(-50%); top: 10px; }
+  .tabs { left: 10px; transform: none; top: 10px; max-width: calc(100% - 64px); }
   .tabs button { padding: 7px 11px; font-size: 13px; }
   .tools { left: 10px; bottom: 10px; } .tools button { padding: 6px 9px; font-size: 12px; }
   .hint { display: none; }
@@ -149,3 +149,12 @@ button.zero { cursor: pointer; } button.zero:hover { box-shadow: 0 2px 10px rgba
 .lbc b { font-family: var(--ui); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--layer); }
 .lbc span { font-size: 14px; line-height: 1.45; }
 @media (max-width: 380px) { .zeros { grid-template-columns: 1fr; } }
+
+/* full-screen button, top right of the model (matches the campus map) */
+.fsbtn { position: absolute; z-index: 6; top: 14px; right: 14px; width: 40px; height: 40px; border-radius: 2px; border: 1px solid rgba(37,40,42,.15); background: rgba(255,255,255,.94); color: var(--dark-gray); cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 0; }
+.fsbtn:hover { border-color: var(--orange-dark); color: var(--orange-dark); }
+.fsbtn svg { width: 20px; height: 20px; }
+@media (max-width: 760px) { .fsbtn { top: 10px; right: 10px; width: 36px; height: 36px; } }
+/* keep the hint clear of the toolbar when the model area is narrow (embeds, side panel) */
+.viewer { container-type: inline-size; }
+@container (max-width: 820px) { .hint { display: none; } .viewer.look .hint { display: block; top: 62px; bottom: auto; right: 14px; } }

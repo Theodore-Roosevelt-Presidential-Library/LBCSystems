@@ -1341,6 +1341,24 @@ tabs.querySelectorAll('button').forEach(b => b.addEventListener('click', () => s
 if (LOCK_LAYER) tabs.hidden = true;
 btnUnder.addEventListener('click', () => { userLook = true; setXray(!xray, true); });
 btnRoof.addEventListener('click', () => { userLook = true; setRoof(!roofOff); interior.visible = roofOff || BCUT.on; mech.visible = roofOff || (BCUT.on && BCUT.ang !== 0); if (roofOff && stop < 0) flyTo(W(235, 85, 0), W(330, -160, 330)); });
+// full-screen toggle (same icon as the campus map). Inside an embed it fills the screen with the iframe;
+// where the browser can't (iPhone Safari), it opens the full-screen page in a new tab instead.
+{
+  const fsBtn = document.getElementById('btn-fs'), root = document.documentElement;
+  const IN = '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>', OUT = '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>';
+  const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+  if (fsBtn) {
+    fsBtn.addEventListener('click', () => {
+      if (fsEl()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+      const req = root.requestFullscreen || root.webkitRequestFullscreen;
+      const canFs = req && (document.fullscreenEnabled || document.webkitFullscreenEnabled);
+      if (canFs) { const r = req.call(root); if (r && r.catch) r.catch(() => openPage()); } else openPage();
+    });
+    const openPage = () => { const u = new URL(location.href); ['embed', 'lock', 'panel', 'layer', 'stop'].forEach(k => u.searchParams.delete(k)); u.hash = stop >= 0 ? `${layer}/${stop + 1}` : layer; window.open(u.href, '_blank', 'noopener'); };
+    const sync = () => { const on = !!fsEl(); fsBtn.querySelector('svg').innerHTML = on ? IN : OUT; fsBtn.title = fsBtn.ariaLabel = on ? 'Exit full screen' : 'Full screen'; setTimeout(resize, 50); };
+    document.addEventListener('fullscreenchange', sync); document.addEventListener('webkitfullscreenchange', sync);
+  }
+}
 btnReset.addEventListener('click', () => { if (stop >= 0) { const v = viewFor(LAYERS[layer].stops[stop]); flyTo(v.t, v.pos); } else flyTo(HOME.target, HOME.pos); });
 panel.querySelector('.panel-toggle')?.addEventListener('click', () => panel.classList.toggle('collapsed'));
 
