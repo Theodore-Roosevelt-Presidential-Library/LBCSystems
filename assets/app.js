@@ -22,6 +22,7 @@ const D2R = Math.PI / 180;
 
 // ---------- DOM ----------
 const viewer = document.getElementById('viewer');
+const TOUCH = matchMedia('(pointer: coarse)').matches;
 const panel = document.getElementById('panel');
 const tabs = document.getElementById('tabs');
 const btnUnder = document.getElementById('btn-under');
@@ -1230,8 +1231,9 @@ function setXray(v) {
   xray = v; btnUnder.setAttribute('aria-pressed', v);
   groundMats.forEach(m => { m.opacity = v ? (layer === 'water' && stop >= 0 && LAYERS.water.stops[stop].id === 'loop' ? .22 : .4) : 1; m.depthWrite = !v; if (m.transparent !== v) { m.transparent = v; m.needsUpdate = true; } });
   controls.maxPolarAngle = v || CUT.on ? Math.PI * .62 : Math.PI * .49;
+  if (typeof camHint !== 'undefined') syncCam();
 }
-function setRoof(off) { roofOff = off; ROOFCUT.off = off; planGroup.visible = off; btnRoof.setAttribute('aria-pressed', off); roofParts.forEach(m => m.visible = !off); updateBcut(); }
+function setRoof(off) { roofOff = off; ROOFCUT.off = off; planGroup.visible = off; btnRoof.setAttribute('aria-pressed', off); roofParts.forEach(m => m.visible = !off); updateBcut(); if (typeof camHint !== 'undefined') syncCam(); }
 function setWood(on) { mats.body.color.copy(on ? woodColor : bodyColor); }
 function resolveCut(c) { return c ? { c0: null, ...c, c: typeof c.c === 'string' ? P[c.c].slice(0, 2) : (c.c || c.c0) } : null; }
 function setCuts(stopDef) {
@@ -1249,6 +1251,16 @@ function setCuts(stopDef) {
 function showCallouts(list) {
   const want = new Set(list || []);
   Object.entries(callouts).forEach(([id, arr]) => arr.forEach(o => { const vis = want.has(id) && o.parent && o.parent.visible !== false && isShown(o); o.visible = vis; o.element.style.display = vis ? '' : 'none'; }));
+}
+const camHint = viewer.querySelector('.hint') || document.querySelector('.hint');
+// free look only outside the guided tour; during a step the camera holds the framed view
+function syncCam() {
+  const free = stop < 0;
+  controls.enabled = free; viewer.classList.toggle('locked', !free); viewer.classList.toggle('look', roofOff || xray);
+  if (!camHint) return;
+  camHint.textContent = free
+    ? (TOUCH ? 'Drag to turn · Pinch to zoom · Two fingers to pan' : 'Drag to turn · Scroll to zoom · Right-drag to pan') + (layer === 'overview' ? '' : ' · Tap a number')
+    : 'View is set for this step · Tap the step again to look around';
 }
 const legendEl = document.createElement('div'); legendEl.className = 'legend'; viewer.appendChild(legendEl);
 function updateFlows(id) {
@@ -1303,6 +1315,7 @@ function renderPanel() {
   panel.querySelectorAll('[data-stop]').forEach(b => b.addEventListener('click', () => { const i = +b.dataset.stop; if (i === stop && b.closest('li') && !b.classList.contains('next')) { stop = -1; setCuts(null); setXray(false); showCallouts([]); updateFlows(null); renderPanel(); hotspotEls[layer].forEach(el => el.classList.remove('active')); return; } selectStop(i); }));
   panel.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => setLayer(b.dataset.go)));
   panel.querySelectorAll('[data-dtab]').forEach(b => b.addEventListener('click', () => { detailTab = b.dataset.dtab; renderPanel(); }));
+  syncCam();
   const open = panel.querySelector('li.open'); if (open) open.scrollIntoView({ block: 'nearest', behavior: REDUCED ? 'auto' : 'smooth' });
 }
 
@@ -1312,7 +1325,7 @@ tabs.querySelectorAll('button').forEach(b => b.addEventListener('click', () => s
 if (LOCK_LAYER) tabs.hidden = true;
 btnUnder.addEventListener('click', () => setXray(!xray));
 btnRoof.addEventListener('click', () => { setRoof(!roofOff); interior.visible = roofOff || BCUT.on; mech.visible = roofOff || (BCUT.on && BCUT.ang !== 0); if (roofOff && stop < 0) flyTo(W(235, 85, 0), W(330, -160, 330)); });
-btnReset.addEventListener('click', () => flyTo(HOME.target, HOME.pos));
+btnReset.addEventListener('click', () => { if (stop >= 0) { const v = viewFor(LAYERS[layer].stops[stop]); flyTo(v.t, v.pos); } else flyTo(HOME.target, HOME.pos); });
 panel.querySelector('.panel-toggle')?.addEventListener('click', () => panel.classList.toggle('collapsed'));
 
 // ---------- resize / loop ----------
