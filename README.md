@@ -64,3 +64,7 @@ Static site for GitHub Pages (no build step). three.js r160 is vendored in `asse
 - Whether the copper beech was planted by Theodore Roosevelt (some sources say so; the page says only that it grew at Sagamore Hill).
 - That the benches in photo 019 are the reused timber mats; that the live-edge counter in photo 094 is the copper beech (caption avoids saying so).
 - Rammed-earth soil source (Metropolis: within 50 miles; Dezeen: on site) and height (27 vs 30 ft) — page avoids both.
+
+## Living Building Challenge layer
+
+The Overview explains the Living Building Challenge in plain words (simple and technical tabs), shows the Library's "four zeros" (brochure language from the LBC audit package, I20-7) and compares LEED with LBC. Each relevant tour step carries a one-line "Living Building Challenge · petal" note (`lbc` in `content.js`). Sources: LBC 4.0 standard; LBC Ready Audit package (I06-1 Net Positive Water narrative, incl. ILFI WT-008 scale-jumping approval, Nov 2023; I08-4 resilience; I20-7 brochure); ILFI Trim Tab (35th Living Building, Aug 2024); Wikipedia/USGBC for LEED counts (100,000+ projects). Recheck the "35+" Living Building count with ILFI before major launches.
