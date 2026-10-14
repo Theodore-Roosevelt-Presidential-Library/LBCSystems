@@ -39,6 +39,9 @@ d=dict(
   mechRoom=dict(corners=corners, angle=round(ang,2), equipment=room_eq),
   # C310.B (registered via C510): Contech underground detention system under the east lot, ~230 x 30 ft
   detention=dict(c=[1940.7,485.5], ang=115.4, l=225, w=30),
+  # M001A east berm piping plan (1/8"=1'-0"), mapped by the east-wall line: NPT-1 40,000 gal, DWT-1 15,000 gal, top of tank 2530.0 (= +14 ft)
+  storageTanks=dict(npt=[[499.4,89.7],[497.8,20.8]], dwt=[[497.7,14.1],[497.1,-12.5]], top=14.0, dia=10.5),
+  berm=[[464.8,146.7],[614.5,50.4],[613.2,-57.3],[425.2,-18.7]],
 )
 json.dump(d,open(OUT+'systems.json','w'),separators=(',',':'))
 print({k:(len(v) if hasattr(v,'__len__') else v) for k,v in d.items()}, corners, ang)

@@ -328,9 +328,11 @@ const ROOF_LAYERS = [ // from top down: thickness (ft, drawn a little thicker th
 ];
 const bcapMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .9, side: THREE.DoubleSide });
 const bcap = new THREE.Mesh(new THREE.BufferGeometry(), bcapMat); bcap.visible = false; bcap.frustumCulled = false; groups.building.add(bcap);
+const BERM = { poly: null };
+const ROOFCUT = { off: false, planes: [new THREE.Plane(new THREE.Vector3(0, -1, 0), 15)] }; // dollhouse cut at 15 ft
 function updateBcut() {
   const on = BCUT.on && BCUT.k > 0.001;
-  bMats.forEach(m => { const want = on ? bPlanes : null; if (m.clippingPlanes !== want) { m.clippingPlanes = want; m.needsUpdate = true; } });
+  bMats.forEach(m => { const want = on ? bPlanes : (ROOFCUT.off ? ROOFCUT.planes : null); if (m.clippingPlanes !== want) { m.clippingPlanes = want; m.needsUpdate = true; } });
   bcap.visible = on; if (!on) return;
   const l = BCUT.l * BCUT.k, w = BCUT.w * BCUT.k;
   const { u, v, c0 } = cutFrame(BCUT.c, BCUT.ang, l, w);
@@ -353,10 +355,25 @@ function updateBcut() {
           const q = [[prev.x, a1, prev.y], [prev.x, a0, prev.y], [cur.x, b1, cur.y], [cur.x, b0, cur.y]];
           [0, 1, 2, 2, 1, 3].forEach(k => { pos.push(q[k][0], q[k][1], -q[k][2]); colr.push(col.r, col.g, col.b); nor.push(nrm[0], 0, -nrm[1]); });
         });
+        if (BERM.poly && inPoly(prev.x, prev.y, BERM.poly) && inPoly(cur.x, cur.y, BERM.poly)) {
+          const a1 = prev.T - z, b1 = cur.T - z, a0 = Math.max(BCUT.z, hAt(prev.x, prev.y)), b0 = Math.max(BCUT.z, hAt(cur.x, cur.y));
+          if (a1 > a0 && b1 > b0) { col.set('#9A7A55'); const q = [[prev.x, a1, prev.y], [prev.x, a0, prev.y], [cur.x, b1, cur.y], [cur.x, b0, cur.y]];
+            [0, 1, 2, 2, 1, 3].forEach(k => { pos.push(q[k][0], q[k][1], -q[k][2]); colr.push(col.r, col.g, col.b); nor.push(nrm[0], 0, -nrm[1]); }); }
+        }
       }
       prev = cur;
     }
   });
+  // earth floor across the cut where it falls inside the berm
+  if (BERM.poly && inPoly(BCUT.c[0], BCUT.c[1], BERM.poly)) {
+    col.set('#8C6D4C'); const N = 24, z0 = BCUT.z + .05;
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const P0 = (a, b) => [c0[0] + u[0] * l * a / N + v[0] * w * b / N, c0[1] + u[1] * l * a / N + v[1] * w * b / N];
+      const q = [P0(i, j), P0(i + 1, j), P0(i + 1, j + 1), P0(i, j + 1)];
+      const cc = P0(i + .5, j + .5); if (!inPoly(cc[0], cc[1], BERM.poly) || roofAt(...cc) - 4.2 < z0) continue;
+      [0, 1, 2, 0, 2, 3].forEach(k => { pos.push(q[k][0], z0, -q[k][1]); colr.push(col.r, col.g, col.b); nor.push(0, 1, 0); });
+    }
+  }
   const g = bcap.geometry; g.dispose();
   const ng = new THREE.BufferGeometry(); ng.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); ng.setAttribute('color', new THREE.Float32BufferAttribute(colr, 3)); ng.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   bcap.geometry = ng;
@@ -506,6 +523,7 @@ function marker(group, pos, num, color, stopIdx) {
   const el = document.createElement('button');
   el.className = 'hotspot'; el.style.setProperty('--c', color); el.textContent = num;
   el.setAttribute('aria-label', `Stop ${num}`);
+  ['pointerdown', 'mousedown', 'touchstart'].forEach(ev => el.addEventListener(ev, e => e.stopPropagation(), { passive: true }));
   el.addEventListener('click', e => { e.stopPropagation(); selectStop(stopIdx); });
   const o = new CSS2DObject(el); o.position.copy(pos); group.add(o); return el;
 }
@@ -582,17 +600,22 @@ const roofParts = [];
   };
   gltf.scene.traverse(o => {
     if (!o.isMesh) return;
-    const n = (o.name + ' ' + (o.parent?.name || '')).toLowerCase().trim();
+    const n = (o.name + ' ' + (o.parent?.name || '')).toLowerCase().replace(/_/g, ' ').trim();
     const m = pick(n);
     if (m) o.material = m; else { o.material = o.material.clone(); o.material.side = THREE.DoubleSide; o.material.clipIntersection = true; bMats.push(o.material); }
     if (/roof/.test(n)) roofParts.push(o);
     o.castShadow = true; o.receiveShadow = true;
   });
   groups.building.add(gltf.scene);
-  // CampusMap keeps its ground flat; lay paths, the Boardwalk and people onto the real terrain
   gltf.scene.updateMatrixWorld(true);
+  // roof plants are instanced meshes: anything instanced that sits up on the roof lifts with it
+  gltf.scene.traverse(o => { if (!o.isInstancedMesh || roofParts.includes(o)) return; o.computeBoundingBox(); const b = o.boundingBox.clone().applyMatrix4(o.matrixWorld); const cx = (b.min.x + b.max.x) / 2, cy = -(b.min.z + b.max.z) / 2; if (b.max.y > 6 && roofAt(cx, cy) > 5) { roofParts.push(o); o.material.clipIntersection = true; if (!bMats.includes(o.material)) bMats.push(o.material); } });
+  // also plain meshes named like plants
+  gltf.scene.traverse(o => { if (o.isMesh && !roofParts.includes(o) && /plant/i.test(o.name + (o.parent?.name || ''))) roofParts.push(o); });
+  // CampusMap keeps its ground flat; lay paths, the Boardwalk and people onto the real terrain
   const drape = [];
-  gltf.scene.traverse(o => { if (o.isMesh && !o.isInstancedMesh && clipWithGround.includes(o.material)) drape.push(o); });
+  gltf.scene.traverse(o => { if (!o.isMesh || o.isInstancedMesh || !clipWithGround.includes(o.material)) return; o.geometry.computeBoundingBox(); const b = o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld); if (b.min.y > 3 || b.max.y > 8) { if (!roofParts.includes(o)) roofParts.push(o); return; } drape.push(o); });
+  gltf.scene.traverse(o => { if (!o.isInstancedMesh || roofParts.includes(o)) return; o.computeBoundingBox(); const b = o.boundingBox.clone().applyMatrix4(o.matrixWorld); if (b.min.y > 3) roofParts.push(o); });
   drape.forEach(o => {
     const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
     const p = g.attributes.position;
@@ -605,6 +628,24 @@ const roofParts = [];
 }
 // interior group: things you only see when the building is cut open
 const interior = new THREE.Group(); groups.building.add(interior);
+
+// ---- interior floor plan, shown when the roof is lifted (A201 First Floor Plan – Overall, registered to the model) ----
+const planGroup = new THREE.Group(); planGroup.visible = false; groups.building.add(planGroup);
+{
+  const PB = { x0: -10, x1: 480, y0: -70, y1: 240 };
+  const tex = new THREE.TextureLoader().load('assets/models/floorplan.jpg'); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  const fm = new THREE.MeshStandardMaterial({ map: tex, roughness: 1, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  footprints.forEach(fp => {
+    const g = new THREE.ShapeGeometry(shapeFrom(fp)); const pa = g.attributes.position, uv = g.attributes.uv;
+    for (let i = 0; i < pa.count; i++) uv.setXY(i, (pa.getX(i) - PB.x0) / (PB.x1 - PB.x0), (pa.getY(i) - PB.y0) / (PB.y1 - PB.y0));
+    g.rotateX(-Math.PI / 2); const m = new THREE.Mesh(g, fm); m.position.y = .45; m.receiveShadow = true; planGroup.add(m);
+  });
+  fetch('assets/data/walls.json').then(r => r.json()).then(walls => {
+    const geos = [];
+    walls.forEach(([outer, holes]) => { const sh = shapeFrom(outer); holes.forEach(h => sh.holes.push(new THREE.Path(h.map(p => new THREE.Vector2(p[0], p[1]))))); const g = new THREE.ExtrudeGeometry(sh, { depth: 9, bevelEnabled: false }); g.rotateX(-Math.PI / 2); geos.push(g); });
+    if (geos.length) { const wm = new THREE.Mesh(mergeGeometries(geos), std('#F3EEE3', { r: .85 })); wm.castShadow = true; wm.receiveShadow = true; planGroup.add(wm); }
+  });
+}
 
 // ---- mechanical room E148 (layout from M301, schedules from M802) ----
 const MR = sys.mechRoom, mrAng = MR.angle * D2R;
@@ -835,16 +876,45 @@ const PURPLE = '#7C6FD0', BLUE = '#3B9BD6';
   const pt = sys.processTanks.map(([a, b]) => ({ a, b, c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }));
   const axis = (() => { const d = [pt[0].b[0] - pt[0].a[0], pt[0].b[1] - pt[0].a[1]]; const L = Math.hypot(...d); return [d[0] / L, d[1] / L]; })();
   const step = [pt[1].c[0] - pt[0].c[0], pt[1].c[1] - pt[0].c[1]];
-  const capsule = (c, r, len, color, d) => { const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 6, 20), std(color, { r: .45, e: .15 })); m.rotation.z = Math.PI / 2; const g = new THREE.Group(); g.add(m); g.position.copy(B(c[0], c[1], d)); g.rotation.y = Math.atan2(axis[1], axis[0]); g.traverse(o => o.castShadow = true); H2O.add(g); return g; };
-  pt.forEach(t => capsule(t.c, 5, Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1]) - 10, '#B79A6B', 9));
-  const potC = [pt[2].c[0] + step[0] * 1.3, pt[2].c[1] + step[1] * 1.3], npC = [pt[2].c[0] + step[0] * 2.75, pt[2].c[1] + step[1] * 2.75];
-  capsule(potC, 5, 19, BLUE, 9);
-  capsule(npC, 6, 39, PURPLE, 10);
-  const lift = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 16, 18), std('#8E8A82')); lift.position.copy(B(sys.liftStation[0], sys.liftStation[1], 8)); H2O.add(lift);
-  callout(H2O, 'proc', B(pt[1].c[0], pt[1].c[1], 2));
-  callout(H2O, 'potable', B(potC[0], potC[1], 2));
-  callout(H2O, 'np', B(npC[0], npC[1], 2), { left: true });
-  callout(H2O, 'lift', B(sys.liftStation[0], sys.liftStation[1], -2));
+  const capsule = (c, r, len, color, z, ax = axis) => { const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 6, 24), std(color, { r: .45, e: .15 })); m.rotation.z = Math.PI / 2; const g = new THREE.Group(); g.add(m); g.position.copy(W(c[0], c[1], z)); g.rotation.y = Math.atan2(ax[1], ax[0]); g.traverse(o => o.castShadow = true); H2O.add(g); return g; };
+  // three 20,000-gallon FRP process tanks (C510, C516): buried with their tops at least 3 ft below grade
+  pt.forEach(t => { const g0 = Math.min(hAt(...t.a), hAt(...t.b), hAt(...t.c), -2); t.z = g0 - 5 - 3; capsule(t.c, 5, Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1]) - 10, '#B79A6B', t.z); });
+  // storage tanks in the east berm (M001A): NPT-1 40,000 gal non-potable, DWT-1 15,000 gal domestic; top of tank +14 ft
+  const ST = sys.storageTanks, tr = ST.dia / 2, TZ = ST.top - tr;
+  const tankOf = ([a, b]) => ({ c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], L: Math.hypot(b[0] - a[0], b[1] - a[1]), ax: [(b[0] - a[0]) / Math.hypot(b[0] - a[0], b[1] - a[1]), (b[1] - a[1]) / Math.hypot(b[0] - a[0], b[1] - a[1])] });
+  const NPT = tankOf(ST.npt), DWT = tankOf(ST.dwt);
+  const potC = DWT.c, npC = NPT.c;
+  capsule(potC, tr, DWT.L - 2 * tr, BLUE, TZ, DWT.ax);
+  capsule(npC, tr, NPT.L - 2 * tr, PURPLE, TZ, NPT.ax);
+  P.tanks = [(potC[0] + npC[0]) / 2, (potC[1] + npC[1]) / 2, TZ];
+  // the east berm: earth piled against the east building, under the sloping prairie roof
+  {
+    const poly = sys.berm, cell = 3, top = (x, y) => Math.max(hAt(x, y) + .5, roofAt(x, y) - 4.2);
+    const xs = poly.map(p => p[0]), ys = poly.map(p => p[1]);
+    const pos = [], srf = [];
+    for (let x = Math.min(...xs); x < Math.max(...xs); x += cell) for (let y = Math.min(...ys); y < Math.max(...ys); y += cell) {
+      if (!inPoly(x + cell / 2, y + cell / 2, poly) || roofAt(x + cell / 2, y + cell / 2) < 1) continue;
+      const q = [[x, y], [x + cell, y], [x + cell, y + cell], [x, y + cell]].map(([u, v]) => [u, top(u, v), -v]);
+      [0, 2, 1, 0, 3, 2].forEach(k => { pos.push(...q[k]); srf.push(q[k][1]); });
+      // sides where the neighbor is outside
+      [[0, -1, 0, 1], [1, 0, 1, 2], [0, 1, 2, 3], [-1, 0, 3, 0]].forEach(([dx, dy, i0, i1]) => {
+        const nx = x + cell / 2 + dx * cell, ny = y + cell / 2 + dy * cell;
+        if (inPoly(nx, ny, poly) && roofAt(nx, ny) >= 1) return;
+        const A = q[i0], Bq = q[i1], ga = hAt(A[0], -A[2]), gb = hAt(Bq[0], -Bq[2]);
+        const quad = [A, Bq, [Bq[0], gb, Bq[2]], [A[0], ga, A[2]]];
+        [0, 1, 2, 0, 2, 3].forEach(k => { pos.push(...quad[k]); srf.push(Math.max(A[1], Bq[1])); });
+      });
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('surf', new THREE.Float32BufferAttribute(srf, 1)); g.computeVertexNormals();
+    const bm = strataMaterial({ clipIntersection: true }); bMats.push(bm);
+    const berm = new THREE.Mesh(g, bm); berm.receiveShadow = true; groups.building.add(berm);
+    BERM.poly = poly;
+  }
+  const lift = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 16, 18), std('#8E8A82')); lift.position.copy(W(sys.liftStation[0], sys.liftStation[1], Math.min(hAt(...sys.liftStation), -2) - 9)); H2O.add(lift);
+  callout(H2O, 'proc', W(pt[1].c[0], pt[1].c[1], pt[1].z + 6));
+  callout(H2O, 'potable', W(potC[0], potC[1], ST.top + 1));
+  callout(H2O, 'np', W(npC[0], npC[1], ST.top + 1), { left: true });
+  callout(H2O, 'lift', W(sys.liftStation[0], sys.liftStation[1], Math.min(hAt(...sys.liftStation), -2) - 1));
   ['MBR', 'BREAK'].forEach(t => eqPos[t] && callout(H2O, t, eqPos[t]));
   const mbr = eqPos.MBR ? eqPos.MBR.clone().setY(3) : W(420, 90, 3);
   const bldg = (x, y) => W(x, y, 3);
@@ -852,12 +922,12 @@ const PURPLE = '#7C6FD0', BLUE = '#3B9BD6';
   const rd = site.chateauRoad.filter(p => p[0] < X1 - 20 && p[1] < Y1 - 20).slice(0, 3).reverse().map(p => [p[0], p[1]]);
   routes.supply = [...rd, [900, 60], [700, 150], potC];
   pipe(H2O, smooth(routes.supply.map(([x, y]) => B(x, y, 7)), 5), 2, 'drinking', { speed: 20, stops: ['pipeline', 'tanks'] });
-  pipe(H2O, smooth([B(potC[0], potC[1], 6), B(500, 140, 5), B(455, 125, 5), bldg(430, 115), bldg(320, 120), bldg(200, 110)], 4), .9, 'drinking', { speed: 14, stops: ['pipeline', 'reuse'], shell: false });
+  pipe(H2O, smooth([W(potC[0], potC[1], TZ), B(500, 140, 5), B(455, 125, 5), bldg(430, 115), bldg(320, 120), bldg(200, 110)], 4), .9, 'drinking', { speed: 14, stops: ['pipeline', 'reuse'], shell: false });
   // wastewater: building -> lift station -> process tanks -> MBR skid -> recycled-water tank
   pipe(H2O, smooth([bldg(150, 125), bldg(300, 135), B(420, 150, 6), B(sys.liftStation[0], sys.liftStation[1], 8)], 4), 1, 'waste', { speed: 10, stops: ['tanks', 'process', 'treat', 'reuse'], shell: false });
   pipe(H2O, smooth([B(sys.liftStation[0], sys.liftStation[1], 7), ...pt.map(t => B(t.c[0], t.c[1], 6))], 3), .9, 'waste', { speed: 8, stops: ['tanks', 'process', 'treat'], shell: false });
   pipe(H2O, smooth([B(pt[2].c[0], pt[2].c[1], 6), B(470, 120, 4), mbr], 3), .8, 'waste', { speed: 8, stops: ['treat', 'process'], shell: false });
-  pipe(H2O, smooth([mbr.clone().setY(4), B(470, 110, 4), B(npC[0], npC[1], 8)], 3), .8, 'treated', { speed: 8, stops: ['treat', 'tanks', 'process'], shell: false });
+  pipe(H2O, smooth([mbr.clone().setY(4), B(470, 110, 4), W(npC[0], npC[1], TZ)], 3), .8, 'treated', { speed: 8, stops: ['treat', 'tanks', 'process'], shell: false });
   // recycled water back in for flushing
   routes.recycled = [npC, [520, 120], [480, 100], [440, 92]];
   pipe(H2O, smooth([...routes.recycled.map(([x, y]) => B(x, y, 6)), bldg(420, 90), bldg(330, 80), bldg(180, 60)], 4), 1.8, 'treated', { speed: 14, stops: ['reuse'] });
@@ -1021,17 +1091,18 @@ const label3 = (group, id, pos, left) => callout(group, id, pos, { left });
   }
 
   // ---- material samples, set out on the prairie south of the building ----
-  const sampleAt = (x, y, lift = 0) => W(x, y, hAt(x, y) + lift);
+  // each sample stands on its own raised plinth, clear of the ground and the Boardwalk
+  const plinth = (c, l, w) => { let top = -1e9; for (let dx = -l / 2; dx <= l / 2; dx += 3) for (let dy = -w / 2; dy <= w / 2; dy += 3) top = Math.max(top, hAt(c[0] + dx, c[1] + dy)); top += 2.5; let low = 1e9; for (let dx = -l / 2; dx <= l / 2; dx += 3) for (let dy = -w / 2; dy <= w / 2; dy += 3) low = Math.min(low, hAt(c[0] + dx, c[1] + dy)); const h = top - low + 1; const m = new THREE.Mesh(new THREE.BoxGeometry(l + 4, h, w + 4), std('#EDE7D9', { r: .9 })); m.position.copy(W(c[0], c[1], top - h / 2)); m.receiveShadow = true; plinths.push([m, c]); return top; };
+  const plinths = [];
   // (a) carbon ledger: whole-building LCA (Atelier Ten, 2026) — typical steel building vs the Library
   {
     const g = new THREE.Group(); C.add(g); specimens.ledger = { g, lab: {} };
-    const c = [175, -150], gz = hAt(...c), k = 46;
+    const c = [170, -235], gz = plinth(c, 70, 24), k = 46;
     const bar = (dx, h, color, op) => { const m = new THREE.Mesh(new THREE.BoxGeometry(12, h, 12), std(color, { r: .6, op, dw: op == null })); m.position.copy(W(c[0] + dx, c[1], gz + h / 2)); g.add(m); return m; };
     bar(-22, k, '#8E9399');
     bar(0, k * .74, '#C98846');
     bar(22, k * .48, '#7FB069');
     bar(22, k * .74, '#7FB069', .22).position.copy(W(c[0] + 22, c[1], gz + k * .74 / 2));
-    const base = new THREE.Mesh(new THREE.BoxGeometry(62, .6, 20), std('#E8E2D4')); base.position.copy(W(c[0], c[1], gz + .3)); g.add(base);
     // carbon pulled out of the air and held in the wood (the hatched gap on the right bar)
     flows(g, Array.from({ length: 16 }, () => { const x = c[0] + 22 + rnd(-5, 5), y = c[1] + rnd(-5, 5); return [W(x, y, gz + k * .74 + 22), W(x, y, gz + k * .5)]; }), 'carbon', { stops: ['embodied'], ov: false, spacing: 8, speed: 5, size: .5 });
     label3(C, 'ledger0', W(c[0] - 22, c[1], gz + k + 1), true);
@@ -1042,7 +1113,7 @@ const label3 = (group, id, pos, left) => callout(group, id, pos, { left });
   // (b) low-carbon concrete: test cylinders, typical vs Library mixes (ForConstructionPros; Metropolis)
   {
     const g = new THREE.Group(); C.add(g); specimens.concrete = { g, lab: {} };
-    const c = [300, -150], gz = hAt(...c) + 1;
+    const c = [290, -235], gz = plinth(c, 50, 20) + .7;
     const cyl = (dx, parts) => { let z = gz; parts.forEach(([h, col]) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, h, 32), std(col, { r: .8 })); m.position.copy(W(c[0] + dx, c[1], z + h / 2)); g.add(m); z += h; }); return z; };
     // binder share only, drawn as stacked bands: dark = portland cement, tan = fly ash, white = slag
     const tTop = cyl(-12, [[18, '#5F6368']]);
@@ -1050,7 +1121,6 @@ const label3 = (group, id, pos, left) => callout(group, id, pos, { left });
     // the CO2 that comes with each mix
     const puff = (dx, n, top) => { for (let q = 0; q < n; q++) { const r = rnd(1, 1.7), m = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), std('#4F5D66', { op: .7, dw: false })); m.position.copy(W(c[0] + dx + rnd(-2.5, 2.5), c[1] + rnd(-2.5, 2.5), top + 2 + q * 1.4)); g.add(m); } };
     puff(-12, 8, tTop); puff(12, 4, lTop);
-    const base = new THREE.Mesh(new THREE.BoxGeometry(44, .6, 16), std('#E8E2D4')); base.position.copy(W(c[0], c[1], gz - .7)); g.add(base);
     label3(C, 'mixTypical', W(c[0] - 12, c[1], tTop + 14), true);
     label3(C, 'mixLibrary', W(c[0] + 12, c[1], lTop + 8));
     label3(C, 'flyash', W(c[0] + 16, c[1], gz + 10));
@@ -1059,7 +1129,7 @@ const label3 = (group, id, pos, left) => callout(group, id, pos, { left });
   // (c) rammed earth: a slice of the wall, 2 ft thick, built in compacted lifts (Grand Forks Herald; Buildings.com)
   {
     const g = new THREE.Group(); C.add(g); specimens.earth = { g, lab: {} };
-    const c = [55, -150], gz = hAt(...c), Lw = 22, T = 2, lift = 8 / 12, n = 33;
+    const c = [55, -235], gz = plinth(c, 30, 12) - 1, Lw = 22, T = 2, lift = 8 / 12, n = 33;
     const pal = ['#D7B98C', '#C9A177', '#B9825A', '#A9703F', '#C79A6A', '#E0C59A', '#9C8A74', '#B57B4F'].map(x => new THREE.Color(x));
     const geo = new THREE.BoxGeometry(Lw, lift, T); const im = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 1 }), n);
     let band = 0;
@@ -1077,7 +1147,7 @@ const label3 = (group, id, pos, left) => callout(group, id, pos, { left });
   // (d) saved and used again: heart pine, Sagamore Hill copper beech, Hebron brick, timber-mat bench
   {
     const g = new THREE.Group(); C.add(g); specimens.reuse = { g, lab: {} };
-    const c = [420, -150], gz = hAt(...c) + .3;
+    const c = [420, -235], gz = plinth([c[0] + 5, c[1]], 66, 16) + .3;
     // heart pine boards, 5, 7 and 9 in wide
     [5, 7, 9, 5, 7, 9, 7].forEach((w, q) => { const b = new THREE.Mesh(new THREE.BoxGeometry(12, .1, w / 12), std(q % 2 ? '#B5733A' : '#A9652F', { r: .55 })); let off = 0; for (let r = 0; r < q; r++) off += [5, 7, 9, 5, 7, 9, 7][r] / 12 + .05; b.position.copy(W(c[0] - 16, c[1] - 2 + off, gz + 2.2)); g.add(b); });
     const stand = new THREE.Mesh(new THREE.BoxGeometry(12.4, 2, 4.9), std('#E8E2D4')); stand.position.copy(W(c[0] - 16, c[1] + .4, gz + 1)); g.add(stand);
@@ -1093,7 +1163,6 @@ const label3 = (group, id, pos, left) => callout(group, id, pos, { left });
     // bench from reused construction timber mats
     [0, 1, 2].forEach(q => { const t = new THREE.Mesh(new THREE.BoxGeometry(10, 1, 1), std('#8B7558', { r: .9 })); t.position.copy(W(c[0] + 26, c[1] - 1 + q * 1.02, gz + 1.7)); g.add(t); });
     [[-4], [4]].forEach(([dx]) => { const t = new THREE.Mesh(new THREE.BoxGeometry(1, 1.2, 3.2), std('#7B664C', { r: .9 })); t.position.copy(W(c[0] + 26 + dx, c[1], gz + .6)); g.add(t); });
-    const base = new THREE.Mesh(new THREE.BoxGeometry(60, .4, 12), std('#E8E2D4')); base.position.copy(W(c[0] + 5, c[1], gz - .2)); g.add(base);
     label3(C, 'pine', W(c[0] - 16, c[1], gz + 2.6), true);
     label3(C, 'beech', W(c[0], c[1], gz + 3.6));
     label3(C, 'brick', W(c[0] + 13, c[1], gz + 1.8));
@@ -1101,6 +1170,7 @@ const label3 = (group, id, pos, left) => callout(group, id, pos, { left });
     g.visible = false; P.reuse = [c[0] + 5, c[1], gz + 6];
   }
 
+  plinths.forEach(([m, c]) => { const k = ['ledger', 'concrete', 'earth', 'reuse'].reduce((best, k) => { const pp = P[k]; const d = Math.hypot(pp[0] - c[0], pp[1] - c[1]); return d < best[1] ? [k, d] : best; }, ['', 1e9])[0]; specimens[k].g.add(m); });
   // ---- prairie: soil pit with deep roots, seed story, soil cores ----
   const rstop = LAYERS.carbon.stops.find(s => s.id === 'prairie');
   const { u, v, c0 } = cutFrame(rstop.cut.c, rstop.cut.ang, rstop.cut.l, rstop.cut.w);
@@ -1141,6 +1211,7 @@ const hotspotEls = { energy: [], water: [], carbon: [] };
 ['energy', 'water', 'carbon'].forEach(k => LAYERS[k].stops.forEach((s, i) => { const p = at(s.at); if (s.cut) p.y = Math.max(p.y, 4); hotspotEls[k].push(marker(groups[k], p, i + 1, LAYERS[k].color, i)); }));
 
 // ---------- state ----------
+let detailTab = 'simple';
 let layer = 'overview', stop = -1, xray = false, roofOff = false;
 const HOME = { target: W(420, -110, -20), pos: W(1080, -1010, 520) };
 const fly = { active: false };
@@ -1160,7 +1231,7 @@ function setXray(v) {
   groundMats.forEach(m => { m.opacity = v ? (layer === 'water' && stop >= 0 && LAYERS.water.stops[stop].id === 'loop' ? .22 : .4) : 1; m.depthWrite = !v; if (m.transparent !== v) { m.transparent = v; m.needsUpdate = true; } });
   controls.maxPolarAngle = v || CUT.on ? Math.PI * .62 : Math.PI * .49;
 }
-function setRoof(off) { roofOff = off; btnRoof.setAttribute('aria-pressed', off); roofParts.forEach(m => m.visible = !off); }
+function setRoof(off) { roofOff = off; ROOFCUT.off = off; planGroup.visible = off; btnRoof.setAttribute('aria-pressed', off); roofParts.forEach(m => m.visible = !off); updateBcut(); }
 function setWood(on) { mats.body.color.copy(on ? woodColor : bodyColor); }
 function resolveCut(c) { return c ? { c0: null, ...c, c: typeof c.c === 'string' ? P[c.c].slice(0, 2) : (c.c || c.c0) } : null; }
 function setCuts(stopDef) {
@@ -1226,11 +1297,12 @@ function renderPanel() {
   if (layer === 'overview') {
     body = `<div class="pick">${['energy', 'water', 'carbon'].map(k => `<button data-go="${k}" style="--c:${LAYERS[k].color}"><b>${LAYERS[k].label}</b><span>${LAYERS[k].stops.length} stops</span></button>`).join('')}</div>`;
   } else {
-    body = `<ol class="stops">${L.stops.map((s, i) => `<li class="${i === stop ? 'open' : ''}"><button data-stop="${i}" aria-expanded="${i === stop}"><i>${i + 1}</i>${s.title}${s.cut || s.bcut ? '<em class="cut-tag">cutaway</em>' : ''}</button>${i === stop ? `<div class="detail">${s.photo ? `<figure class="ph"><img src="assets/photos/trpl-${s.photo[0]}-480.jpg" srcset="assets/photos/trpl-${s.photo[0]}-480.jpg 480w, assets/photos/trpl-${s.photo[0]}-1400.jpg 1400w" sizes="(max-width: 760px) 92vw, 400px" alt="${s.photo[1]}" loading="lazy"><figcaption>${s.photo[1]}</figcaption></figure>` : ''}<p>${s.text}</p><div class="nav">${i > 0 ? `<button data-stop="${i - 1}">‹ Back</button>` : '<span></span>'}${i < L.stops.length - 1 ? `<button data-stop="${i + 1}" class="next">Next ›</button>` : `<button data-go="overview" class="next">All systems</button>`}</div></div>` : ''}</li>`).join('')}</ol>`;
+    body = `<ol class="stops">${L.stops.map((s, i) => `<li class="${i === stop ? 'open' : ''}"><button data-stop="${i}" aria-expanded="${i === stop}"><i>${i + 1}</i>${s.title}${s.cut || s.bcut ? '<em class="cut-tag">cutaway</em>' : ''}</button>${i === stop ? `<div class="detail">${s.photo ? `<figure class="ph"><img src="assets/photos/trpl-${s.photo[0]}-480.jpg" srcset="assets/photos/trpl-${s.photo[0]}-480.jpg 480w, assets/photos/trpl-${s.photo[0]}-1400.jpg 1400w" sizes="(max-width: 760px) 92vw, 400px" alt="${s.photo[1]}" loading="lazy"><figcaption>${s.photo[1]}</figcaption></figure>` : ''}<div class="dtabs" role="tablist"><button role="tab" data-dtab="simple" aria-selected="${detailTab === 'simple'}">How it works</button>${s.tech ? `<button role="tab" data-dtab="tech" aria-selected="${detailTab === 'tech'}">Technical details</button>` : ''}</div><p class="${detailTab === 'tech' && s.tech ? 'tech' : ''}">${detailTab === 'tech' && s.tech ? s.tech : s.text}</p><div class="nav">${i > 0 ? `<button data-stop="${i - 1}">‹ Back</button>` : '<span></span>'}${i < L.stops.length - 1 ? `<button data-stop="${i + 1}" class="next">Next ›</button>` : `<button data-go="overview" class="next">All systems</button>`}</div></div>` : ''}</li>`).join('')}</ol>`;
   }
   panel.querySelector('.panel-body').innerHTML = `<div class="eyebrow">Theodore Roosevelt Presidential Library</div><h2>${L.title}</h2><p class="intro">${L.intro}</p>${stats}${body}<p class="note">${NOTE}</p>`;
   panel.querySelectorAll('[data-stop]').forEach(b => b.addEventListener('click', () => { const i = +b.dataset.stop; if (i === stop && b.closest('li') && !b.classList.contains('next')) { stop = -1; setCuts(null); setXray(false); showCallouts([]); updateFlows(null); renderPanel(); hotspotEls[layer].forEach(el => el.classList.remove('active')); return; } selectStop(i); }));
   panel.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => setLayer(b.dataset.go)));
+  panel.querySelectorAll('[data-dtab]').forEach(b => b.addEventListener('click', () => { detailTab = b.dataset.dtab; renderPanel(); }));
   const open = panel.querySelector('li.open'); if (open) open.scrollIntoView({ block: 'nearest', behavior: REDUCED ? 'auto' : 'smooth' });
 }
 
@@ -1239,7 +1311,7 @@ tabs.innerHTML = ['overview', 'energy', 'water', 'carbon'].map(k => `<button rol
 tabs.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setLayer(b.dataset.layer)));
 if (LOCK_LAYER) tabs.hidden = true;
 btnUnder.addEventListener('click', () => setXray(!xray));
-btnRoof.addEventListener('click', () => { setRoof(!roofOff); interior.visible = roofOff || BCUT.on; mech.visible = roofOff || (BCUT.on && BCUT.ang !== 0); });
+btnRoof.addEventListener('click', () => { setRoof(!roofOff); interior.visible = roofOff || BCUT.on; mech.visible = roofOff || (BCUT.on && BCUT.ang !== 0); if (roofOff && stop < 0) flyTo(W(235, 85, 0), W(330, -160, 330)); });
 btnReset.addEventListener('click', () => flyTo(HOME.target, HOME.pos));
 panel.querySelector('.panel-toggle')?.addEventListener('click', () => panel.classList.toggle('collapsed'));
 
@@ -1251,6 +1323,26 @@ function resize() {
 }
 new ResizeObserver(resize).observe(viewer); resize();
 const clock = new THREE.Clock();
+let frameN = 0;
+// keep callout boxes from sitting on top of each other: nudge them up the screen
+function declutter() {
+  const items = [];
+  labelRenderer.domElement.querySelectorAll('.co').forEach(co => {
+    if (co.style.display === 'none' || co.parentElement?.style.display === 'none') return;
+    const box = co.querySelector('.callout'); if (!box) return;
+    const off = +(box.dataset.off || 0); const r = box.getBoundingClientRect(); if (!r.width) return;
+    items.push({ box, off, l: r.left, r: r.right, t: r.top - off, b: r.bottom - off });
+  });
+  items.sort((a, b) => b.b - a.b);
+  const placed = [];
+  items.forEach(it => {
+    let dy = 0;
+    for (let k = 0; k < 12; k++) { const hit = placed.find(p => it.l < p.r + 4 && it.r > p.l - 4 && it.t + dy < p.b + 3 && it.b + dy > p.t - 3); if (!hit) break; dy = hit.t - 3 - it.b; }
+    const nd = Math.round(dy * .5 + it.off * .5);
+    if (Math.abs(nd - it.off) > .5) { it.box.dataset.off = nd; it.box.style.transform = nd ? `translateY(${nd}px)` : ''; }
+    placed.push({ l: it.l, r: it.r, t: it.t + nd, b: it.b + nd });
+  });
+}
 renderer.setAnimationLoop(() => {
   const t = clock.getElapsedTime(), dt = Math.min(.05, t - (renderer._lt ?? t)); renderer._lt = t;
   if (fly.active) {
@@ -1263,6 +1355,7 @@ renderer.setAnimationLoop(() => {
   animators.forEach(f => f(t));
   controls.update();
   renderer.render(scene, camera); labelRenderer.render(scene, camera);
+  if ((++frameN % 4) === 0) declutter();
 });
 
 // ---------- start ----------
