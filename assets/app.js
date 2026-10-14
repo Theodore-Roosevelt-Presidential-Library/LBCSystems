@@ -332,6 +332,7 @@ const bcap = new THREE.Mesh(new THREE.BufferGeometry(), bcapMat); bcap.visible =
 const BERM = { poly: null };
 const ROOFCUT = { off: false, planes: [new THREE.Plane(new THREE.Vector3(0, -1, 0), 15)] }; // dollhouse cut at 15 ft
 function updateBcut() {
+  if (BERM.mesh) BERM.mesh.visible = !!BCUT.on;
   const on = BCUT.on && BCUT.k > 0.001;
   bMats.forEach(m => { const want = on ? bPlanes : (ROOFCUT.off ? ROOFCUT.planes : null); if (m.clippingPlanes !== want) { m.clippingPlanes = want; m.needsUpdate = true; } });
   bcap.visible = on; if (!on) return;
@@ -909,7 +910,7 @@ const PURPLE = '#7C6FD0', BLUE = '#3B9BD6';
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('surf', new THREE.Float32BufferAttribute(srf, 1)); g.computeVertexNormals();
     const bm = strataMaterial({ clipIntersection: true }); bMats.push(bm);
     const berm = new THREE.Mesh(g, bm); berm.receiveShadow = true; groups.building.add(berm);
-    BERM.poly = poly;
+    BERM.poly = poly; BERM.mesh = berm; berm.visible = false; // only drawn inside a building cutaway
   }
   const lift = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 16, 18), std('#8E8A82')); lift.position.copy(W(sys.liftStation[0], sys.liftStation[1], Math.min(hAt(...sys.liftStation), -2) - 9)); H2O.add(lift);
   callout(H2O, 'proc', W(pt[1].c[0], pt[1].c[1], pt[1].z + 6));
@@ -1227,10 +1228,23 @@ function viewFor(s) {
   if (v.from) return { t, pos: W(...v.from) };
   return { t, pos: t.clone().add(dir.multiplyScalar(v.dist)) };
 }
-function setXray(v) {
+// "See through ground" from the toolbar shows every buried system at once, whatever layer is open
+const XRAY_LABELS = ['loop', 'vault', 'mains', 'proc', 'lift', 'potable', 'np', 'trench', 'detention'];
+let xrayAll = false;
+function setXrayAll(on) {
+  xrayAll = on;
+  ['energy', 'water', 'carbon'].forEach(n => { groups[n].visible = n === layer || on; });
+  const s = stop >= 0 ? LAYERS[layer].stops[stop] : null;
+  showCallouts([...(s?.show || []), ...(on ? XRAY_LABELS : [])]);
+  if (on) flowReg.forEach(f => { if (!f.phys && f.group && f.group !== groups[layer]) f.inst.visible = false; }); // pipes and tanks only, no sun rays or dots from other layers
+  else if (typeof updateFlows === 'function') updateFlows(s ? s.id : null);
+}
+function setXray(v, manual = false) {
+  if (xrayAll && !(manual && v)) setXrayAll(false);
   xray = v; btnUnder.setAttribute('aria-pressed', v);
   groundMats.forEach(m => { m.opacity = v ? (layer === 'water' && stop >= 0 && LAYERS.water.stops[stop].id === 'loop' ? .22 : .4) : 1; m.depthWrite = !v; if (m.transparent !== v) { m.transparent = v; m.needsUpdate = true; } });
   controls.maxPolarAngle = v || CUT.on ? Math.PI * .62 : Math.PI * .49;
+  if (manual && v) setXrayAll(true);
   if (typeof camHint !== 'undefined') syncCam();
 }
 function setRoof(off) { roofOff = off; ROOFCUT.off = off; planGroup.visible = off; btnRoof.setAttribute('aria-pressed', off); roofParts.forEach(m => m.visible = !off); updateBcut(); if (typeof camHint !== 'undefined') syncCam(); }
@@ -1325,7 +1339,7 @@ function renderPanel() {
 tabs.innerHTML = ['overview', 'energy', 'water', 'carbon'].map(k => `<button role="tab" data-layer="${k}" style="--c:${LAYERS[k].color || '#1B4633'}">${LAYERS[k].label}</button>`).join('');
 tabs.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setLayer(b.dataset.layer)));
 if (LOCK_LAYER) tabs.hidden = true;
-btnUnder.addEventListener('click', () => { userLook = true; setXray(!xray); });
+btnUnder.addEventListener('click', () => { userLook = true; setXray(!xray, true); });
 btnRoof.addEventListener('click', () => { userLook = true; setRoof(!roofOff); interior.visible = roofOff || BCUT.on; mech.visible = roofOff || (BCUT.on && BCUT.ang !== 0); if (roofOff && stop < 0) flyTo(W(235, 85, 0), W(330, -160, 330)); });
 btnReset.addEventListener('click', () => { if (stop >= 0) { const v = viewFor(LAYERS[layer].stops[stop]); flyTo(v.t, v.pos); } else flyTo(HOME.target, HOME.pos); });
 panel.querySelector('.panel-toggle')?.addEventListener('click', () => panel.classList.toggle('collapsed'));
